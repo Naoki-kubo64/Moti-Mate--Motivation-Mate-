@@ -104,6 +104,12 @@ class SettingsWindow(ctk.CTkToplevel):
         self.lbl_break_val = ctk.CTkLabel(frm_break, text=f"{int(self.parent.break_minutes)}分", font=self.font_main, width=40)
         self.lbl_break_val.pack(side="left")
         
+        # タイマー操作ボタン
+        frm_btns = ctk.CTkFrame(frm_timer, fg_color="transparent")
+        frm_btns.pack(fill="x", pady=(10, 5), padx=10)
+        ctk.CTkButton(frm_btns, text="開始/停止", command=self.parent.toggle_timer, font=self.font_bold, width=120, height=35).pack(side="left", padx=5, expand=True)
+        ctk.CTkButton(frm_btns, text="リセット", command=self.parent.reset_timer, font=self.font_main, fg_color="#777", width=80, height=35).pack(side="left", padx=5)
+        
         # AIフィードバック間隔 (Legacy) also helpful
         ctk.CTkLabel(tab, text="※AIは設定された作業/休憩時間に関わらず、\n　アプリ内のインターバル設定に従って定期診断を行います。", font=self.font_small, text_color="#666").pack(pady=10)
         
@@ -729,11 +735,13 @@ class MascotApp(ctk.CTk):
                 model = genai.GenerativeModel('gemini-2.0-flash')
             
             # タイマーの状態もコンテキストに追加
-            timer_status = "タイマー停止中"
+            # ユーザー要望: 停止中は催促しない、稼働中は鼓舞する
             if self.timer_running:
                 mins = self.timer_seconds // 60
                 secs = self.timer_seconds % 60
-                timer_status = f"タイマー稼働中 (残り {mins}分{secs}秒)"
+                timer_status = f"【重要】タイマー稼働中 (残り {mins}分{secs}秒)。\n指示: 残り時間を意識して、ゴールに向けて鼓舞してください。「あと少し！」等の声掛けが有効です。"
+            else:
+                timer_status = "【重要】タイマー停止中（フリーモード）。\n指示: ユーザーはタイマーを使わずに作業しています。タイマーの使用を強制したり、開始を促す発言は禁止です。純粋に画面の作業内容を見て評価してください。"
 
             # JSON出力指示 (全プリセット共通)
             json_instruction = """
