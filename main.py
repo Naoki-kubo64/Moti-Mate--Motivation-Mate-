@@ -137,7 +137,15 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def run_test_analysis(self):
         self.parent.current_mode = self.entry_mode.get().strip()
-        threading.Thread(target=self.parent.process_with_ai, daemon=True).start()
+        
+        def on_complete(emotion, message):
+            self.textbox_log.configure(state="normal")
+            ts = datetime.now().strftime('%H:%M:%S')
+            self.textbox_log.insert("0.0", f"[{ts}] ({emotion})\n{message}\n{'-'*30}\n")
+            self.textbox_log.configure(state="disabled")
+
+        threading.Thread(target=self.parent.process_with_ai, args=(on_complete,), daemon=True).start()
+        
         self.textbox_log.configure(state="normal")
         self.textbox_log.insert("0.0", f"[{datetime.now().strftime('%H:%M:%S')}] テスト実行リクエスト送信...\n")
         self.textbox_log.configure(state="disabled")
@@ -572,7 +580,7 @@ class MascotApp(ctk.CTk):
 
             self.process_with_ai()
 
-    def process_with_ai(self):
+    def process_with_ai(self, on_done=None):
         try:
             img = ImageGrab.grab()
             genai.configure(api_key=self.api_key)
@@ -627,11 +635,16 @@ class MascotApp(ctk.CTk):
             
             self.after(0, self.update_ui_reaction, emotion, message)
             self.save_log(emotion, message)
+            
+            if on_done:
+                self.after(0, on_done, emotion, message)
 
         except Exception as e:
             print(f"Error: {e}")
             self.save_log("error", f"エラー発生: {e}")
             self.after(0, self.update_ui_reaction, "neutral", f"エラー: {e}")
+            if on_done:
+                self.after(0, on_done, "error", f"エラー: {e}")
 
     def update_ui_reaction(self, emotion, message):
         self.update_character_image(emotion)
