@@ -581,14 +581,6 @@ class MascotApp(ctk.CTk):
             self.api_key = ""
             print("Warning: secrets.py not found. API functionality will be limited.")
 
-    def load_settings(self):
-        try:
-            import secrets
-            self.api_key = secrets.GEMINI_API_KEY
-        except ImportError:
-            self.api_key = ""
-            print("Warning: secrets.py not found. API functionality will be limited.")
-
         # デフォルト設定
         self.current_mode = "作業中"
         self.interval_minutes = 5
@@ -619,10 +611,10 @@ class MascotApp(ctk.CTk):
 
 【出力フォーマット】
 以下のJSONフォーマットのみを出力してください。Markdownタグは不要です。
-{{
+{
     "emotion": "happy", "angry", or "neutral",
     "message": "50文字以内の台詞（タメ口、感情豊かに、パートナーとして）"
-}}"""
+}"""
 
         if os.path.exists("settings.json"):
             try:
@@ -640,10 +632,11 @@ class MascotApp(ctk.CTk):
                     self.window_transparency = data.get("window_transparency", 1.0)
                     self.always_on_top = data.get("always_on_top", True)
                     self.enable_notifications = data.get("enable_notifications", True)
-                    # プロンプトは長いので、保存されていた場合のみ上書き
+                    
                     saved_prompt = data.get("system_prompt", "")
                     if saved_prompt:
-                        self.system_prompt = saved_prompt
+                        # 以前のバグで保存された二重括弧を修正
+                        self.system_prompt = saved_prompt.replace("{{", "{").replace("}}", "}")
             except: pass
 
     def open_settings(self):
