@@ -59,6 +59,14 @@ class SettingsWindow(ctk.CTkToplevel):
         self.label_interval_val = ctk.CTkLabel(self.tab_settings, text=f"{int(self.parent.interval_minutes)}分")
         self.label_interval_val.pack()
 
+        # 白背景透過設定
+        self.switch_remove_bg = ctk.CTkSwitch(self.tab_settings, text="カスタム画像の白背景を透過する")
+        if self.parent.remove_white_bg:
+            self.switch_remove_bg.select()
+        else:
+            self.switch_remove_bg.deselect()
+        self.switch_remove_bg.pack(pady=10)
+        
         # Custom Image Picker
         ctk.CTkLabel(self.tab_settings, text="カスタム画像 (推し画像):").pack(pady=(10, 5))
         frm_img = ctk.CTkFrame(self.tab_settings, fg_color="transparent")
@@ -180,11 +188,13 @@ class SettingsWindow(ctk.CTkToplevel):
         self.parent.current_mode = self.entry_mode.get().strip()
         self.parent.interval_minutes = int(self.slider_interval.get())
         self.parent.show_character = bool(self.switch_show.get())
+        self.parent.remove_white_bg = bool(self.switch_remove_bg.get())
         
         settings = {
             "current_mode": self.parent.current_mode,
             "interval_minutes": self.parent.interval_minutes,
             "show_character": self.parent.show_character,
+            "remove_white_bg": self.parent.remove_white_bg,
             "custom_image_path": self.parent.custom_image_path
         }
         with open("settings.json", "w", encoding="utf-8") as f:
@@ -461,6 +471,20 @@ class MascotApp(ctk.CTk):
         if os.path.exists(self.custom_image_path):
             try:
                 img = Image.open(self.custom_image_path).convert("RGBA")
+                
+                # 白背景透過処理
+                if self.remove_white_bg:
+                    datas = img.getdata()
+                    new_data = []
+                    threshold = 240
+                    for item in datas:
+                        # R,G,Bすべてが閾値以上なら透明にする
+                        if item[0] > threshold and item[1] > threshold and item[2] > threshold:
+                            new_data.append((255, 255, 255, 0))
+                        else:
+                            new_data.append(item)
+                    img.putdata(new_data)
+
                 img.thumbnail((180, 240), Image.Resampling.LANCZOS)
                 self.custom_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
             except Exception as e:
@@ -498,6 +522,7 @@ class MascotApp(ctk.CTk):
         self.current_mode = "作業中"
         self.interval_minutes = 5
         self.show_character = True
+        self.remove_white_bg = False
         self.custom_image_path = ""
         
         if os.path.exists("settings.json"):
@@ -507,6 +532,7 @@ class MascotApp(ctk.CTk):
                     self.current_mode = data.get("current_mode", "作業中")
                     self.interval_minutes = data.get("interval_minutes", 5)
                     self.show_character = data.get("show_character", True)
+                    self.remove_white_bg = data.get("remove_white_bg", False)
                     self.custom_image_path = data.get("custom_image_path", "")
             except: pass
 
