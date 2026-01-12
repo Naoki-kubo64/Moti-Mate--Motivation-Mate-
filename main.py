@@ -735,8 +735,17 @@ class MascotApp(ctk.CTk):
                 secs = self.timer_seconds % 60
                 timer_status = f"タイマー稼働中 (残り {mins}分{secs}秒)"
 
+            # JSON出力指示 (全プリセット共通)
+            json_instruction = """
+【出力フォーマット】
+以下のJSONフォーマットのみを出力してください。Markdownタグは不要です。
+{
+    "emotion": "happy", "angry", or "neutral",
+    "message": "50文字以内の台詞（タメ口、感情豊かに、パートナーとして）"
+}"""
+
             # システムプロンプトと動的コンテキストの結合
-            full_prompt = f"{self.system_prompt}\n\n【現在コンテキスト(自動挿入)】\nユーザーの現在の目標: {self.current_mode}\nタイマーの状態: {timer_status}"
+            full_prompt = f"{self.system_prompt}\n\n{json_instruction}\n\n【現在コンテキスト(自動挿入)】\nユーザーの現在の目標: {self.current_mode}\nタイマーの状態: {timer_status}"
             
             response = model.generate_content([full_prompt, img])
             text = response.text.strip()
