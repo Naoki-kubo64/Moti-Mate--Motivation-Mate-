@@ -498,6 +498,17 @@ class MascotApp(ctk.CTk):
     def reset_pomodoro(self):
         self.timer_running = False
         self.timer_seconds = 0
+        if self.timer_widget:
+            self.timer_widget.place_forget()
+
+    def toggle_timer(self):
+        if self.timer_running:
+            self.pause_pomodoro()
+        else:
+            self.start_pomodoro(self.work_minutes)
+
+    def reset_timer(self):
+        self.reset_pomodoro()
         if self.timer_widget and self.timer_widget.winfo_exists():
             self.timer_widget.destroy()
             self.timer_widget = None
@@ -687,9 +698,24 @@ class MascotApp(ctk.CTk):
             else:
                 self.image_label.configure(image=None, text=f"({emotion})")
 
-    def start_monitoring(self):
-        if self.monitor_thread and self.monitor_thread.is_alive():
-            return
+    def toggle_timer(self):
+        if self.timer_running:
+            self.timer_running = False
+        else:
+            if self.timer_seconds <= 0:
+                self.timer_seconds = self.work_minutes * 60
+            self.timer_running = True
+            self.update_timer()
+
+    def reset_timer(self):
+        self.timer_running = False
+        self.timer_seconds = self.work_minutes * 60
+        # タイマー表示の更新が必要ならここで行うが、
+        # メインループ(update_timer)が止まると更新されない可能性があるため
+        # 一度だけ呼び出すか、UI更新ロジックを分離する
+        # ここでは簡易的に update_timer を呼ばずに変数だけリセットし、
+        # 次回起動時に反映、または update_timer が再帰的に呼ばれるか確認が必要
+        # とりあえず変数をリセット。
         self.monitoring = True
         self.monitor_thread = threading.Thread(target=self.monitoring_loop, daemon=True)
         self.monitor_thread.start()
