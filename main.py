@@ -364,9 +364,9 @@ class MascotApp(ctk.CTk):
         if self.current_bubble and self.current_bubble.winfo_exists():
             self.current_bubble.destroy()
         
-        # マスコットの左上に出す (位置調整)
-        bx = self.mascot_x - 130
-        by = self.mascot_y - 40
+        # マスコットの左下寄りに出す
+        bx = self.mascot_x - 150
+        by = self.mascot_y + 10
         
         self.current_bubble = SpeechBubble(self.container, message, emotion)
         self.current_bubble.place(x=bx, y=by)
@@ -380,9 +380,9 @@ class MascotApp(ctk.CTk):
             
             if self.timer_widget is None or not self.timer_widget.winfo_exists():
                 self.timer_widget = TimerDisplay(self.container)
-                # タイマーはマスコットの右下へ
+                # タイマーはマスコットの右側（少し上）ヘ
                 tx = self.mascot_x + 130
-                ty = self.mascot_y + 110
+                ty = self.mascot_y + 50
                 self.timer_widget.place(x=tx, y=ty)
                 
             self.timer_widget.lift()
