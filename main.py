@@ -477,7 +477,7 @@ class MascotApp(ctk.CTk):
                 self.timer_widget = TimerDisplay(self.container)
                 # タイマーはマスコットの頭上へ
                 tx = self.mascot_x + 40
-                ty = self.mascot_y - 60
+                ty = self.mascot_y - 30
                 self.timer_widget.place(x=tx, y=ty)
                 
             self.timer_widget.lift()
