@@ -14,6 +14,7 @@ from winotify import Notification as VerifyNotification
 
 import google.generativeai as genai
 from datetime import datetime
+from presets import PERSONALITY_PRESETS
 
 # ライブラリセットアップ
 ctk.set_appearance_mode("System")
@@ -121,20 +122,38 @@ class SettingsWindow(ctk.CTkToplevel):
         self.combo_model.set(self.parent.ai_model)
         self.combo_model.pack(fill="x", pady=5)
         
-        # プロンプト設定
-        ctk.CTkLabel(tab, text="システムプロンプト (性格・振る舞い):", font=self.font_bold).pack(anchor="w", pady=(15, 5))
-        self.txt_prompt = ctk.CTkTextbox(tab, font=self.font_main, height=200)
-        self.txt_prompt.pack(fill="both", expand=True, pady=5)
-        self.txt_prompt.insert("0.0", self.parent.system_prompt)
+        # 性格プリセット選択
+        ctk.CTkLabel(tab, text="性格・振る舞い (プリセット):", font=self.font_bold).pack(anchor="w", pady=(15, 5))
         
+        # ラベルとIDの対応作成
+        self.preset_map = {v["label"]: k for k, v in PERSONALITY_PRESETS.items()}
+        preset_labels = list(self.preset_map.keys())
+        
+        # 現在のIDからラベルを逆引き
+        current_label = PERSONALITY_PRESETS.get(self.parent.personality_id, PERSONALITY_PRESETS["default"])["label"]
+        
+        self.combo_preset = ctk.CTkComboBox(tab, values=preset_labels, command=self.update_preset_description, font=self.font_main)
+        self.combo_preset.set(current_label)
+        self.combo_preset.pack(fill="x", pady=5)
+        
+        # 説明表示用ラベル
+        self.lbl_preset_desc = ctk.CTkLabel(tab, text="", font=self.font_small, text_color="#555", wraplength=400, justify="left")
+        self.lbl_preset_desc.pack(fill="x", pady=(0, 10))
+        self.update_preset_description(current_label) # 初期表示更新
+
         # テスト実行
         ctk.CTkButton(tab, text="設定を保存してAI診断テスト", command=self.run_test_analysis, fg_color="#9C27B0", hover_color="#7B1FA2", font=self.font_bold).pack(pady=10)
         
-        # ログ表示用 (簡易)
+        # ログ表示用
         self.textbox_log = ctk.CTkTextbox(tab, height=80, font=self.font_small)
         self.textbox_log.pack(fill="x", pady=5)
         self.textbox_log.insert("0.0", "ここにテスト結果等が表示されます...")
         self.textbox_log.configure(state="disabled")
+
+    def update_preset_description(self, choice):
+        pid = self.preset_map.get(choice, "default")
+        desc = PERSONALITY_PRESETS[pid]["description"]
+        self.lbl_preset_desc.configure(text=desc)
 
     def setup_appearance_tab(self):
         tab = self.tabview.tab("表示・通知")
@@ -198,8 +217,11 @@ class SettingsWindow(ctk.CTkToplevel):
     def run_test_analysis(self):
         # 設定を一時保存的に適用してテスト
         self.parent.current_mode = self.entry_mode.get().strip()
-        self.parent.system_prompt = self.txt_prompt.get("0.0", "end").strip()
         self.parent.ai_model = self.combo_model.get()
+        
+        # 選択中のプリセットからプロンプトを取得して一時適用
+        pid = self.preset_map.get(self.combo_preset.get(), "default")
+        self.parent.system_prompt = PERSONALITY_PRESETS[pid]["system_prompt"]
         
         def on_complete(emotion, message):
             self.textbox_log.configure(state="normal")
@@ -210,7 +232,7 @@ class SettingsWindow(ctk.CTkToplevel):
         threading.Thread(target=self.parent.process_with_ai, args=(on_complete,), daemon=True).start()
         
         self.textbox_log.configure(state="normal")
-        self.textbox_log.insert("0.0", f"[{datetime.now().strftime('%H:%M:%S')}] テストリクエスト中...\n")
+        self.textbox_log.insert("0.0", f"[{datetime.now().strftime('%H:%M:%S')}] テストリクエスト中... ({pid})\n")
         self.textbox_log.configure(state="disabled")
 
     def save_and_close(self):
@@ -220,7 +242,11 @@ class SettingsWindow(ctk.CTkToplevel):
         self.parent.interval_minutes = int(self.slider_interval.get())
         
         self.parent.ai_model = self.combo_model.get()
-        self.parent.system_prompt = self.txt_prompt.get("0.0", "end").strip()
+        
+        # プリセットIDを保存
+        pid = self.preset_map.get(self.combo_preset.get(), "default")
+        self.parent.personality_id = pid
+        self.parent.system_prompt = PERSONALITY_PRESETS[pid]["system_prompt"]
         
         self.parent.window_transparency = float(self.slider_alpha.get())
         self.parent.always_on_top = bool(self.switch_top.get())
@@ -234,7 +260,7 @@ class SettingsWindow(ctk.CTkToplevel):
             "work_minutes": self.parent.work_minutes,
             "break_minutes": self.parent.break_minutes,
             "ai_model": self.parent.ai_model,
-            "system_prompt": self.parent.system_prompt,
+            "personality_id": self.parent.personality_id,
             "window_transparency": self.parent.window_transparency,
             "always_on_top": self.parent.always_on_top,
             "enable_notifications": self.parent.enable_notifications,
@@ -595,26 +621,9 @@ class MascotApp(ctk.CTk):
         self.window_transparency = 1.0
         self.always_on_top = True
         self.enable_notifications = True
-        self.system_prompt = """あなたはユーザーの親しいパートナーです。以下のルールに従って、ユーザーのPC画面（現在の状態）と設定された目標を比較し、適切に振る舞ってください。
-
-【判断プロセス】
-1. 画面のスクリーンショットを分析し、ユーザーが「現在何をしているか」を特定してください。
-2. その行動が「ユーザーの目標」に沿っているか（頑張っているか）、逸れているか（サボっているか）を判断してください。
-
-【振る舞いのルール (厳守)】
-- **ケースA: 目標と行動が一致している場合**
-  -> 全力で褒めてください。「えらい！」「その調子！」「すごい集中力！」など、肯定的な言葉でモチベーションを上げてください。
-
-- **ケースB: 目標と行動がズレている場合（サボり、関係ないブラウジング等）**
-  -> 愛のある「お説教」や「怒り」を見せるか、あるいは「目標を思い出して！」と前向きに軌道修正させてください。
-  -> ※単に状況を実況する（「YouTubeを見ていますね」等）のは退屈なので禁止です。
-
-【出力フォーマット】
-以下のJSONフォーマットのみを出力してください。Markdownタグは不要です。
-{
-    "emotion": "happy", "angry", or "neutral",
-    "message": "50文字以内の台詞（タメ口、感情豊かに、パートナーとして）"
-}"""
+        
+        self.personality_id = "default"
+        self.system_prompt = PERSONALITY_PRESETS["default"]["system_prompt"]
 
         if os.path.exists("settings.json"):
             try:
@@ -633,10 +642,14 @@ class MascotApp(ctk.CTk):
                     self.always_on_top = data.get("always_on_top", True)
                     self.enable_notifications = data.get("enable_notifications", True)
                     
-                    saved_prompt = data.get("system_prompt", "")
-                    if saved_prompt:
-                        # 以前のバグで保存された二重括弧を修正
-                        self.system_prompt = saved_prompt.replace("{{", "{").replace("}}", "}")
+                    # 性格プリセット読み込み
+                    pid = data.get("personality_id", "default")
+                    if pid in PERSONALITY_PRESETS:
+                        self.personality_id = pid
+                        self.system_prompt = PERSONALITY_PRESETS[pid]["system_prompt"]
+                    else:
+                        self.personality_id = "default"
+                        self.system_prompt = PERSONALITY_PRESETS["default"]["system_prompt"]
             except: pass
 
     def open_settings(self):
