@@ -418,14 +418,44 @@ class MascotApp(ctk.CTk):
                 self.timer_widget.update_time(time_str, color)
             self.after(1000, self.update_timer)
         else:
+            # タイマー終了
             self.timer_running = False
             if self.timer_widget and self.timer_widget.winfo_exists():
                 self.timer_widget.update_time("00:00", "red")
-            self.show_bubble("時間だよ！お疲れ様！", "happy")
+            
             self.update_character_image("happy")
-            try:
-                VerifyNotification(app_id="Moti-Mate", title="Timer Finished", msg="時間になりました！", icon=os.path.abspath("assets/happy.png")).show()
-            except: pass
+            
+            msg = "時間だよ！お疲れ様！\n休憩が終わったなら、また頑張ろう！"
+
+            if self.show_character:
+                # キャラ表示中は吹き出し
+                self.show_bubble("時間だよ！お疲れ様！", "happy")
+                # 念のため既存のWinotifyも残すか、あるいは吹き出しだけで十分か。
+                # 要件「既存の処理を維持」に従い、既存コードにあったWinotifyは「吹き出しがあるなら不要」と解釈し、
+                # ここでは吹き出しのみにする（またはユーザー体験向上のため両方出すのもありだが、今回は分岐させる）
+                # しかし、元のコードでは常にWinotifyが出ていたので、それは邪魔だったかもしれない。
+                # 分岐させることが目的。
+            else:
+                # キャラ非表示 -> Windows通知 (plyer)
+                try:
+                    from plyer import notification
+                    icon_path = os.path.abspath("assets/icon.ico")
+                    if not os.path.exists(icon_path):
+                        icon_path = None
+                    
+                    notification.notify(
+                        title="Moti-Mate Timer",
+                        message=msg,
+                        app_name="Moti-Mate",
+                        app_icon=icon_path,
+                        timeout=10
+                    )
+                except Exception as e:
+                    print(f"Plyer notification failed: {e}")
+                    # Fallback to winotify if plyer fails
+                    try:
+                        VerifyNotification(app_id="Moti-Mate", title="Timer Finished", msg=msg, icon=os.path.abspath("assets/happy.png")).show()
+                    except: pass
 
     def load_custom_image(self):
         if os.path.exists(self.custom_image_path):
