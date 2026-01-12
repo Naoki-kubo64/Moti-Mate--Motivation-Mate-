@@ -107,8 +107,9 @@ class SettingsWindow(ctk.CTkToplevel):
         # タイマー操作ボタン
         frm_btns = ctk.CTkFrame(frm_timer, fg_color="transparent")
         frm_btns.pack(fill="x", pady=(10, 5), padx=10)
-        ctk.CTkButton(frm_btns, text="開始/停止", command=self.parent.toggle_timer, font=self.font_bold, width=120, height=35).pack(side="left", padx=5, expand=True)
-        ctk.CTkButton(frm_btns, text="リセット", command=self.parent.reset_timer, font=self.font_main, fg_color="#777", width=80, height=35).pack(side="left", padx=5)
+        ctk.CTkButton(frm_btns, text="▶ 開始", command=lambda: self.parent.start_pomodoro(int(self.slider_work.get())), font=self.font_bold, width=80, height=35, fg_color="#4CAF50", hover_color="#388E3C").pack(side="left", padx=5, expand=True)
+        ctk.CTkButton(frm_btns, text="⏸ 停止", command=self.parent.pause_pomodoro, font=self.font_bold, width=80, height=35, fg_color="#FF9800", hover_color="#F57C00").pack(side="left", padx=5, expand=True)
+        ctk.CTkButton(frm_btns, text="🔄 リセット", command=self.parent.reset_timer, font=self.font_main, fg_color="#777", width=70, height=35).pack(side="left", padx=5)
         
         # AIフィードバック間隔 (Legacy) also helpful
         ctk.CTkLabel(tab, text="※AIは設定された作業/休憩時間に関わらず、\n　アプリ内のインターバル設定に従って定期診断を行います。", font=self.font_small, text_color="#666").pack(pady=10)
@@ -122,11 +123,6 @@ class SettingsWindow(ctk.CTkToplevel):
     def setup_intelligence_tab(self):
         tab = self.tabview.tab("AI設定")
         
-        # モデル選択
-        ctk.CTkLabel(tab, text="使用モデル:", font=self.font_bold).pack(anchor="w", pady=(10, 5))
-        self.combo_model = ctk.CTkComboBox(tab, values=["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"], font=self.font_main)
-        self.combo_model.set(self.parent.ai_model)
-        self.combo_model.pack(fill="x", pady=5)
         
         # 性格プリセット選択
         ctk.CTkLabel(tab, text="性格・振る舞い (プリセット):", font=self.font_bold).pack(anchor="w", pady=(15, 5))
@@ -223,7 +219,7 @@ class SettingsWindow(ctk.CTkToplevel):
     def run_test_analysis(self):
         # 設定を一時保存的に適用してテスト
         self.parent.current_mode = self.entry_mode.get().strip()
-        self.parent.ai_model = self.combo_model.get()
+        self.parent.ai_model = "gemini-2.0-flash"
         
         # 選択中のプリセットからプロンプトを取得して一時適用
         pid = self.preset_map.get(self.combo_preset.get(), "default")
@@ -247,7 +243,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.parent.break_minutes = int(self.slider_break.get())
         self.parent.interval_minutes = int(self.slider_interval.get())
         
-        self.parent.ai_model = self.combo_model.get()
+        self.parent.ai_model = "gemini-2.0-flash"
         
         # プリセットIDを保存
         pid = self.preset_map.get(self.combo_preset.get(), "default")
@@ -479,9 +475,9 @@ class MascotApp(ctk.CTk):
             
             if self.timer_widget is None or not self.timer_widget.winfo_exists():
                 self.timer_widget = TimerDisplay(self.container)
-                # タイマーはマスコットの右側（さらに左上）ヘ
-                tx = self.mascot_x + 60
-                ty = self.mascot_y + 0
+                # タイマーはマスコットの頭上へ
+                tx = self.mascot_x + 40
+                ty = self.mascot_y - 60
                 self.timer_widget.place(x=tx, y=ty)
                 
             self.timer_widget.lift()
@@ -500,6 +496,13 @@ class MascotApp(ctk.CTk):
         self.timer_seconds = 0
         if self.timer_widget:
             self.timer_widget.place_forget()
+
+    def start_monitoring(self):
+        if self.monitor_thread and self.monitor_thread.is_alive():
+            return
+        self.monitoring = True
+        self.monitor_thread = threading.Thread(target=self.monitoring_loop, daemon=True)
+        self.monitor_thread.start()
 
     def toggle_timer(self):
         if self.timer_running:
