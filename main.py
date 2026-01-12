@@ -472,18 +472,31 @@ class MascotApp(ctk.CTk):
             try:
                 img = Image.open(self.custom_image_path).convert("RGBA")
                 
-                # 白背景透過処理
+                # 白背景透過処理 (Flood Fill)
                 if self.remove_white_bg:
-                    datas = img.getdata()
-                    new_data = []
-                    threshold = 240
-                    for item in datas:
-                        # R,G,Bすべてが閾値以上なら透明にする
-                        if item[0] > threshold and item[1] > threshold and item[2] > threshold:
-                            new_data.append((255, 255, 255, 0))
-                        else:
-                            new_data.append(item)
-                    img.putdata(new_data)
+                    try:
+                        from PIL import ImageDraw
+                        # 左上(0,0)の色を取得 (これが背景色と仮定)
+                        bg_color = img.getpixel((0, 0))
+                        
+                        # 背景色が白っぽい場合のみ実行 (誤爆防止)
+                        # R,G,Bがすべて200以上なら白とみなす
+                        if all(c > 200 for c in bg_color[:3]):
+                            # ImageDraw.floodfillで (0,0) を起点に透明色(0,0,0,0)で塗りつぶす
+                            # threshで多少の色の揺らぎを許容
+                            ImageDraw.floodfill(img, xy=(0, 0), value=(0, 0, 0, 0), thresh=50)
+                    except Exception as e:
+                        print(f"Flood fill transparency failed: {e}")
+                        # フォールバック: 単純置換 (旧ロジック)
+                        datas = img.getdata()
+                        new_data = []
+                        threshold = 240
+                        for item in datas:
+                            if item[0] > threshold and item[1] > threshold and item[2] > threshold:
+                                new_data.append((255, 255, 255, 0))
+                            else:
+                                new_data.append(item)
+                        img.putdata(new_data)
 
                 img.thumbnail((180, 240), Image.Resampling.LANCZOS)
                 self.custom_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
@@ -671,9 +684,17 @@ class MascotApp(ctk.CTk):
             self.show_bubble(message, emotion)
         else:
             try:
-                icon_path = os.path.abspath(f"assets/{emotion}.png")
+                # ユーザーが「非表示でも通知」を求めているかは自明だが、
+                # インジケーターモードなら通知で知らせる
+                
+                # iconは assets/icon.ico または happy.png を使う
+                icon_path = os.path.abspath("assets/icon.ico")
                 if not os.path.exists(icon_path):
-                    icon_path = os.path.abspath("assets/neutral.png")
+                    path_emo = f"assets/{emotion}.png"
+                    if os.path.exists(path_emo):
+                        icon_path = os.path.abspath(path_emo)
+                    else:
+                        icon_path = os.path.abspath("assets/neutral.png")
                 
                 toast = VerifyNotification(
                     app_id="Moti-Mate",
