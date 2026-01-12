@@ -10,7 +10,8 @@ import sys
 from PIL import Image, ImageGrab, ImageTk
 import pystray
 from pystray import MenuItem as item
-from win10toast import ToastNotifier
+from winotify import Notification as VerifyNotification
+
 import google.generativeai as genai
 from datetime import datetime
 
@@ -23,17 +24,180 @@ class SettingsWindow(ctk.CTkToplevel):
         super().__init__(parent)
         self.parent = parent
         self.title("設定 - Motivation Mate")
-        self.geometry("400x500")
+        self.geometry("420x600")
         self.attributes("-topmost", True)
         
         self.create_widgets()
 
     def create_widgets(self):
+        # メインのスクロールフレーム作成
+        self.scroll_frame = ctk.CTkScrollableFrame(self, width=400, height=580)
+        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
+
+        # --- 全体設定 ---
+        ctk.CTkLabel(self.scroll_frame, text="Gemini API Key:", font=("Arial", 12, "bold")).pack(pady=(10, 5))
+        self.entry_api = ctk.CTkEntry(self.scroll_frame, width=300, show="*")
+        self.entry_api.pack(pady=5)
+        if self.parent.api_key:
+            self.entry_api.insert(0, self.parent.api_key)
+
+        # タブビュー作成 (スクロールフレームの中に入れる)
+        self.tabview = ctk.CTkTabview(self.scroll_frame, width=360)
+        self.tabview.pack(pady=10)
+        
+        self.tab_settings = self.tabview.add("設定")
+        self.tab_timer = self.tabview.add("タイマー")
+        self.tab_history = self.tabview.add("履歴")
+        
+        # --- [タブ] 設定 ---
+        ctk.CTkLabel(self.tab_settings, text="現在のモード (目標/作業内容):").pack(pady=(10, 5))
+        self.entry_mode = ctk.CTkEntry(self.tab_settings, width=250)
+        self.entry_mode.pack(pady=5)
+        if self.parent.current_mode:
+            self.entry_mode.insert(0, self.parent.current_mode)
+        
+        ctk.CTkLabel(self.tab_settings, text="AIフィードバック間隔 (分):").pack(pady=(10, 5))
+        self.slider_interval = ctk.CTkSlider(self.tab_settings, from_=1, to=60, number_of_steps=59, command=self.update_interval_label)
+        self.slider_interval.set(self.parent.interval_minutes)
+        self.slider_interval.pack(pady=5)
+        self.label_interval_val = ctk.CTkLabel(self.tab_settings, text=f"{int(self.parent.interval_minutes)}分")
+        self.label_interval_val.pack()
+
+        # Custom Image Picker
+        ctk.CTkLabel(self.tab_settings, text="カスタム画像 (推し画像):").pack(pady=(10, 5))
+        frm_img = ctk.CTkFrame(self.tab_settings, fg_color="transparent")
+        frm_img.pack()
+        self.btn_image = ctk.CTkButton(frm_img, text="画像を選択...", command=self.select_image, width=120)
+        self.btn_image.pack(side="left", padx=5)
+        self.btn_reset_img = ctk.CTkButton(frm_img, text="リセット", command=self.reset_image, width=80, fg_color="#555")
+        self.btn_reset_img.pack(side="left", padx=5)
+        self.lbl_image_path = ctk.CTkLabel(self.tab_settings, text=os.path.basename(self.parent.custom_image_path) if self.parent.custom_image_path else "未選択", font=("Meiryo", 10))
+        self.lbl_image_path.pack()
+
+        # Show Character Switch
+        self.switch_show = ctk.CTkSwitch(self.tab_settings, text="デスクトップにキャラを表示", command=self.toggle_character)
+        if self.parent.show_character:
+            self.switch_show.select()
+        else:
+            self.switch_show.deselect()
+        self.switch_show.pack(pady=20)
+        
+        # Test Run Action
+        ctk.CTkButton(self.tab_settings, text="今すぐAI診断を実行", command=self.run_test_analysis, fg_color="purple", hover_color="darkmagenta").pack(pady=10)
+
+        # --- [タブ] タイマー ---
+        self.timer_mode_var = ctk.StringVar(value="work")
+        frm_timer_mode = ctk.CTkFrame(self.tab_timer, fg_color="transparent")
+        frm_timer_mode.pack(pady=10)
+        ctk.CTkRadioButton(frm_timer_mode, text="作業 (25分)", variable=self.timer_mode_var, value="work", command=self.update_timer_display_preview).pack(side="left", padx=10)
+        ctk.CTkRadioButton(frm_timer_mode, text="休憩 (5分)", variable=self.timer_mode_var, value="break", command=self.update_timer_display_preview).pack(side="left", padx=10)
+        
+        self.lbl_timer_preview = ctk.CTkLabel(self.tab_timer, text="25:00", font=("Arial", 40, "bold"))
+        self.lbl_timer_preview.pack(pady=20)
+        
+        frm_controls = ctk.CTkFrame(self.tab_timer, fg_color="transparent")
+        frm_controls.pack(pady=10)
+        ctk.CTkButton(frm_controls, text="スタート", command=self.start_timer, width=80, fg_color="#4CAF50").pack(side="left", padx=5)
+        ctk.CTkButton(frm_controls, text="一時停止", command=self.pause_timer, width=80, fg_color="#FFC107").pack(side="left", padx=5)
+        ctk.CTkButton(frm_controls, text="リセット", command=self.reset_timer, width=80, fg_color="#F44336").pack(side="left", padx=5)
+
+        # --- [タブ] 履歴 ---
+        self.textbox_log = ctk.CTkTextbox(self.tab_history, width=300, height=300)
+        self.textbox_log.pack(fill="both", expand=True, padx=5, pady=5)
+        self.load_history()
+
+        # --- 保存ボタン (スクロール内下部) ---
+        ctk.CTkButton(self.scroll_frame, text="保存して閉じる", command=self.save_and_close).pack(pady=20)
+
+    def select_image(self):
+        file_path = ctk.filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.gif")])
+        if file_path:
+            self.parent.custom_image_path = file_path
+            self.lbl_image_path.configure(text=os.path.basename(file_path))
+
+    def reset_image(self):
+        self.parent.custom_image_path = ""
+        self.lbl_image_path.configure(text="未選択")
+        self.parent.reset_custom_image()
+
+    def update_timer_display_preview(self):
+        mode = self.timer_mode_var.get()
+        if mode == "work":
+            self.lbl_timer_preview.configure(text="25:00")
+        else:
+            self.lbl_timer_preview.configure(text="05:00")
+            
+    def start_timer(self):
+        mode = self.timer_mode_var.get()
+        minutes = 25 if mode == "work" else 5
+        self.parent.start_pomodoro(minutes)
+        
+    def pause_timer(self):
+        self.parent.pause_pomodoro()
+        
+    def reset_timer(self):
+        self.parent.reset_pomodoro()
+        self.update_timer_display_preview()
+
+    def run_test_analysis(self):
+        self.parent.api_key = self.entry_api.get().strip()
+        self.parent.current_mode = self.entry_mode.get().strip()
+        threading.Thread(target=self.parent.process_with_ai, daemon=True).start()
+        self.textbox_log.configure(state="normal")
+        self.textbox_log.insert("0.0", f"[{datetime.now().strftime('%H:%M:%S')}] テスト実行リクエスト送信...\n")
+        self.textbox_log.configure(state="disabled")
+
+    def load_history(self):
+        if os.path.exists("activity_log.csv"):
+            try:
+                with open("activity_log.csv", "r", encoding="utf-8-sig") as f:
+                    reader = csv.reader(f)
+                    next(reader, None)
+                    logs = list(reader)
+                    text = ""
+                    for row in reversed(logs[-20:]):
+                        if len(row) >= 4:
+                            ts, mode, emo, msg = row
+                            text += f"[{ts}] ({emo})\n{msg}\n{'-'*30}\n"
+                    self.textbox_log.insert("0.0", text)
+            except Exception as e:
+                self.textbox_log.insert("0.0", f"ログ読み込みエラー: {e}")
+        else:
+            self.textbox_log.insert("0.0", "履歴はまだありません。")
+        self.textbox_log.configure(state="disabled")
+
+    def update_interval_label(self, value):
+        self.label_interval_val.configure(text=f"{int(value)}分")
+
+    def toggle_character(self):
+        pass
+
+    def save_and_close(self):
+        self.parent.api_key = self.entry_api.get().strip()
+        self.parent.current_mode = self.entry_mode.get().strip()
+        self.parent.interval_minutes = int(self.slider_interval.get())
+        self.parent.show_character = bool(self.switch_show.get())
+        
+        with open("api_key.txt", "w", encoding="utf-8") as f:
+            f.write(self.parent.api_key)
+            
+        settings = {
+            "current_mode": self.parent.current_mode,
+            "interval_minutes": self.parent.interval_minutes,
+            "show_character": self.parent.show_character,
+            "custom_image_path": self.parent.custom_image_path
+        }
+        with open("settings.json", "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=4, ensure_ascii=False)
+            
+        self.parent.apply_settings()
+        self.destroy()
         # タブ作成
         self.tabview = ctk.CTkTabview(self, width=380, height=480)
         self.tabview.pack(padx=10, pady=10, fill="both", expand=True)
         
         self.tab_settings = self.tabview.add("設定")
+        self.tab_timer = self.tabview.add("タイマー")
         self.tab_history = self.tabview.add("履歴")
         
         # --- 設定タブ ---
@@ -45,39 +209,138 @@ class SettingsWindow(ctk.CTkToplevel):
             self.entry_api.insert(0, self.parent.api_key)
 
         # Mode
-        ctk.CTkLabel(self.tab_settings, text="現在のモード (目標):").pack(pady=(10, 5))
-        self.entry_mode = ctk.CTkEntry(self.tab_settings, width=300)
-        self.entry_mode.pack()
-        if self.parent.current_mode:
-            self.entry_mode.insert(0, self.parent.current_mode)
+        # スクロール可能なフレームを作成
+        self.scroll_frame = ctk.CTkScrollableFrame(self, width=380, height=480)
+        self.scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Interval
+        ctk.CTkLabel(self.scroll_frame, text="Gemini API Key:", font=("Arial", 12, "bold")).pack(pady=(10, 5))
+        self.entry_api = ctk.CTkEntry(self.scroll_frame, width=300, show="*")
+        self.entry_api.insert(0, self.parent.api_key)
+        self.entry_api.pack(pady=5)
+        
+        # Tabs for detailed settings
+        self.tabview = ctk.CTkTabview(self.scroll_frame, width=350)
+        self.tabview.pack(pady=10)
+        self.tabview.add("設定")
+        self.tabview.add("タイマー")
+        self.tabview.add("履歴")
+        
+        self.tab_settings = self.tabview.tab("設定")
+        self.tab_timer = self.tabview.tab("タイマー")
+        self.tab_history = self.tabview.tab("履歴")
+
+        # --- Settings Tab ---
+        ctk.CTkLabel(self.tab_settings, text="現在のモード（行動内容）:").pack(pady=(10, 5))
+        self.entry_mode = ctk.CTkEntry(self.tab_settings, width=250)
+        self.entry_mode.insert(0, self.parent.current_mode)
+        self.entry_mode.pack(pady=5)
+        
         ctk.CTkLabel(self.tab_settings, text="フィードバック間隔 (分):").pack(pady=(10, 5))
         self.slider_interval = ctk.CTkSlider(self.tab_settings, from_=1, to=60, number_of_steps=59, command=self.update_interval_label)
         self.slider_interval.set(self.parent.interval_minutes)
-        self.slider_interval.pack()
+        self.slider_interval.pack(pady=5)
+        
         self.label_interval_val = ctk.CTkLabel(self.tab_settings, text=f"{int(self.parent.interval_minutes)}分")
         self.label_interval_val.pack()
 
         # Show Character Switch
-        self.switch_show = ctk.CTkSwitch(self.tab_settings, text="デスクトップにキャラを表示する", command=self.toggle_character)
+        self.switch_show = ctk.CTkSwitch(self.tab_settings, text="デスクトップにキャラを表示", command=self.toggle_character)
         if self.parent.show_character:
             self.switch_show.select()
         else:
             self.switch_show.deselect()
         self.switch_show.pack(pady=20)
 
-        # Test Run Button
-        ctk.CTkButton(self.tab_settings, text="今すぐAI診断を実行", command=self.run_test_analysis, fg_color="purple", hover_color="darkmagenta").pack(pady=5)
+        # Custom Image Picker
+        ctk.CTkLabel(self.tab_settings, text="カスタム画像 (推し画像):").pack(pady=(10, 5))
+        
+        frm_img = ctk.CTkFrame(self.tab_settings, fg_color="transparent")
+        frm_img.pack()
+        
+        self.btn_image = ctk.CTkButton(frm_img, text="画像を選択...", command=self.select_image, width=120)
+        self.btn_image.pack(side="left", padx=5)
+        
+        self.btn_reset_img = ctk.CTkButton(frm_img, text="リセット", command=self.reset_image, width=80, fg_color="#555")
+        self.btn_reset_img.pack(side="left", padx=5)
+        
+        self.lbl_image_path = ctk.CTkLabel(self.tab_settings, text=os.path.basename(self.parent.custom_image_path) if self.parent.custom_image_path else "未選択", font=("Meiryo", 10))
+        self.lbl_image_path.pack()
 
-        # Save Button
-        # Save Button
-        ctk.CTkButton(self.tab_settings, text="保存して閉じる", command=self.save_and_close).pack(pady=20)
+        # Test Run Button (outside tabs, inside scroll_frame)
+        ctk.CTkButton(self.scroll_frame, text="今すぐAI診断を実行", command=self.run_test_analysis, fg_color="purple", hover_color="darkmagenta").pack(pady=10)
 
-        # --- 履歴タブ ---
-        self.textbox_log = ctk.CTkTextbox(self.tab_history, width=350, height=400)
-        self.textbox_log.pack(fill="both", expand=True, padx=5, pady=5)
-        self.load_history()
+        # --- Timer Tab ---
+        ctk.CTkLabel(self.tab_timer, text="ポモドーロタイマー", font=("Arial", 14, "bold")).pack(pady=10)
+        
+        self.timer_mode_var = ctk.StringVar(value="work")
+        
+        frm_timer_mode = ctk.CTkFrame(self.tab_timer, fg_color="transparent")
+        frm_timer_mode.pack(pady=5)
+        rb_work = ctk.CTkRadioButton(frm_timer_mode, text="作業 (25分)", variable=self.timer_mode_var, value="work", command=self.update_timer_display_preview)
+        rb_work.pack(side="left", padx=10)
+        rb_break = ctk.CTkRadioButton(frm_timer_mode, text="休憩 (5分)", variable=self.timer_mode_var, value="break", command=self.update_timer_display_preview)
+        rb_break.pack(side="left", padx=10)
+        
+        self.lbl_timer_preview = ctk.CTkLabel(self.tab_timer, text="25:00", font=("Arial", 40, "bold"))
+        self.lbl_timer_preview.pack(pady=20)
+        
+        frm_controls = ctk.CTkFrame(self.tab_timer, fg_color="transparent")
+        frm_controls.pack(pady=10)
+        
+        ctk.CTkButton(frm_controls, text="スタート", command=self.start_timer, width=80, fg_color="#4CAF50").pack(side="left", padx=5)
+        ctk.CTkButton(frm_controls, text="一時停止", command=self.pause_timer, width=80, fg_color="#FFC107").pack(side="left", padx=5)
+        ctk.CTkButton(frm_controls, text="リセット", command=self.reset_timer, width=80, fg_color="#F44336").pack(side="left", padx=5)
+
+        # --- History Tab ---
+        # 簡易的にログを表示 (本来はDBやログファイルから読む)
+        try:
+            if os.path.exists("debug.log"):
+                with open("debug.log", "r", encoding="utf-8") as f:
+                    logs = f.readlines()[-20:] # Last 20 lines
+                    log_text = "".join(logs)
+            else:
+                log_text = "履歴はありません。"
+        except Exception as e:
+            log_text = f"履歴読み込みエラー: {e}"
+            
+        self.txt_history = ctk.CTkTextbox(self.tab_history, width=300, height=300)
+        self.txt_history.insert("0.0", log_text)
+        self.txt_history.configure(state="disabled")
+        self.txt_history.pack(padx=5, pady=5, fill="both", expand=True)
+
+        # Save Button (Outside Tabs, but inside ScrollFrame)
+        ctk.CTkButton(self.scroll_frame, text="保存して閉じる", command=self.save_and_close).pack(pady=20)
+
+    def select_image(self):
+        file_path = ctk.filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.gif")])
+        if file_path:
+            self.parent.custom_image_path = file_path
+            self.lbl_image_path.configure(text=os.path.basename(file_path))
+
+    def reset_image(self):
+        self.parent.custom_image_path = ""
+        self.lbl_image_path.configure(text="未選択")
+        self.parent.reset_custom_image()
+
+    def update_timer_display_preview(self):
+        mode = self.timer_mode_var.get()
+        if mode == "work":
+            self.lbl_timer_preview.configure(text="25:00")
+        else:
+            self.lbl_timer_preview.configure(text="05:00")
+            
+    def start_timer(self):
+        # 親のタイマー機能呼び出し
+        mode = self.timer_mode_var.get()
+        minutes = 25 if mode == "work" else 5
+        self.parent.start_pomodoro(minutes)
+        
+    def pause_timer(self):
+        self.parent.pause_pomodoro()
+        
+    def reset_timer(self):
+        self.parent.reset_pomodoro()
+        self.update_timer_display_preview()
 
     def run_test_analysis(self):
         # 設定を一時保存してから実行
@@ -126,9 +389,19 @@ class SettingsWindow(ctk.CTkToplevel):
         self.parent.interval_minutes = int(self.slider_interval.get())
         self.parent.show_character = bool(self.switch_show.get())
         
-        # APIキー保存
-        with open("api_key.txt", "w") as f:
+        # APIキー保存 (互換性のため維持)
+        with open("api_key.txt", "w", encoding="utf-8") as f:
             f.write(self.parent.api_key)
+            
+        # その他の設定保存
+        settings = {
+            "current_mode": self.parent.current_mode,
+            "interval_minutes": self.parent.interval_minutes,
+            "show_character": self.parent.show_character,
+            "custom_image_path": self.parent.custom_image_path
+        }
+        with open("settings.json", "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=4, ensure_ascii=False)
             
         self.parent.apply_settings()
         self.destroy()
@@ -136,6 +409,7 @@ class SettingsWindow(ctk.CTkToplevel):
 class SpeechBubble(ctk.CTkToplevel):
     def __init__(self, parent, text, emotion="neutral"):
         super().__init__(parent)
+        self.parent = parent # Save parent ref
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         
@@ -155,23 +429,108 @@ class SpeechBubble(ctk.CTkToplevel):
         # 位置調整 (親ウィンドウの左上)
         self.update_idletasks()
         try:
-            # 自分のサイズ取得
-            w = self.winfo_width()
-            h = self.winfo_height()
-            
-            # 親の左上あたりに配置 (少し左へ調整)
-            x = parent.winfo_x() - w + 190
-            y = parent.winfo_y() - h + 190
-            
-            if x < 0: x = 0
-            if y < 0: y = 0
-            
-            self.geometry(f"+{x}+{y}")
+            self.align_to_parent()
         except:
             pass
+        
+        # 親に参照を登録(古いのがあれば消すか上書きされる)
+        if hasattr(parent, "current_bubble") and parent.current_bubble and parent.current_bubble.winfo_exists():
+            parent.current_bubble.destroy()
+        parent.current_bubble = self
 
         # 自動消滅
         self.after(8000, self.destroy)
+        
+    def align_to_parent(self, parent_x=None, parent_y=None):
+        if parent_x is None: parent_x = self.parent.winfo_x()
+        if parent_y is None: parent_y = self.parent.winfo_y()
+        
+        w = self.winfo_width()
+        h = self.winfo_height()
+        
+        x = parent_x - w + 190
+        y = parent_y - h + 190
+        
+        if x < 0: x = 0
+        if y < 0: y = 0
+        
+        self.geometry(f"+{x}+{y}")
+
+class HeartWindow(ctk.CTkToplevel):
+    def __init__(self, parent, start_x, start_y):
+        super().__init__(parent)
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.wm_attributes("-transparentcolor", "#000001")
+        self.config(background="#000001")
+        
+        # ハートのラベル
+        self.label = ctk.CTkLabel(self, text="❤", font=("Arial", 24), text_color="#ff5e62", fg_color="#000001")
+        self.label.pack()
+        
+        # 初期位置
+        self.x = start_x
+        self.y = start_y
+        self.geometry(f"+{int(self.x)}+{int(self.y)}")
+        
+        # アニメーション開始
+        self.steps = 0
+        self.animate()
+        
+    def animate(self):
+        if self.steps > 20: # 1秒程度 (50ms * 20)
+            self.destroy()
+            return
+            
+        # フワッと上がる
+        self.y -= 2
+        # 少し横に揺れるかも？
+        
+        self.geometry(f"+{int(self.x)}+{int(self.y)}")
+        self.steps += 1
+        self.after(50, self.animate)
+
+class TimerDisplay(ctk.CTkToplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.parent = parent
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+        self.wm_attributes("-transparentcolor", "#000001")
+        self.config(background="#000001")
+        
+        self.label = ctk.CTkLabel(self, text="25:00", font=("Arial", 28, "bold"), text_color="white", fg_color="#333333", corner_radius=8)
+        self.label.pack(padx=2, pady=2)
+        
+        # ドラッグ移動可能にする (個別に動かしたい場合用)
+        self.label.bind("<Button-1>", self.on_click)
+        self.label.bind("<B1-Motion>", self.on_drag)
+        self._drag_start_x = 0
+        self._drag_start_y = 0
+
+    def update_time(self, text, color="white"):
+        self.label.configure(text=text, text_color=color)
+        
+    def on_click(self, event):
+        self._drag_start_x = event.x
+        self._drag_start_y = event.y
+        
+    def on_drag(self, event):
+        x = self.winfo_x() - self._drag_start_x + event.x
+        y = self.winfo_y() - self._drag_start_y + event.y
+        self.geometry(f"+{x}+{y}")
+        
+    def align_to_mascot(self, mascot_x=None, mascot_y=None):
+        # マスコットの頭上に配置
+        try:
+            if mascot_x is None: mascot_x = self.parent.winfo_x()
+            if mascot_y is None: mascot_y = self.parent.winfo_y()
+            
+            x = mascot_x + 20
+            y = mascot_y - 50
+            if y < 0: y = 0
+            self.geometry(f"+{x}+{y}")
+        except: pass
 
 class MascotApp(ctk.CTk):
     def __init__(self):
@@ -185,21 +544,25 @@ class MascotApp(ctk.CTk):
         self.geometry("200x250+100+100") # 初期サイズ
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        self.wm_attributes("-transparentcolor", "#000001") # 透過色設定 (黒に近い色)
-        self.config(background="#000001") # 背景を透過色にする
+        self.wm_attributes("-transparentcolor", "#000001") # 透過色設定
+        self.config(background="#000001") 
 
         # 画像のロード
         self.images = {}
         self.load_images()
+        self.custom_image = None
+        if self.custom_image_path:
+            self.load_custom_image()
         
         # ウィジェッ (画像表示用)
-        self.image_label = ctk.CTkLabel(self, text="", fg_color="#000001", bg_color="#000001") # bg必須
+        self.image_label = ctk.CTkLabel(self, text="", fg_color="#000001", bg_color="#000001") 
         self.image_label.pack(fill="both", expand=True)
         
         # イベントバインド
-        self.image_label.bind("<Button-1>", self.on_click)
+        self.image_label.bind("<Button-1>", self.on_click_start)
         self.image_label.bind("<B1-Motion>", self.on_drag)
-        self.image_label.bind("<ButtonRelease-1>", self.on_drop) # ドラッグ用
+        self.image_label.bind("<ButtonRelease-1>", self.on_drop)
+        self.image_label.bind("<Double-Button-1>", self.on_double_click)
         
         # 初期状態
         self.update_character_image("neutral")
@@ -207,11 +570,32 @@ class MascotApp(ctk.CTk):
         self.monitor_thread = None
         self.lock = threading.Lock()
         
-        # トースト通知
-        self.toaster = ToastNotifier()
+        # タイマー関連
+        self.timer_seconds = 0
+        self.timer_running = False
+        self.timer_window = None
+        self.current_bubble = None # 吹き出し追跡用
+
+        # トースト通知: plyer uses static methods
 
         # スタートアップ処理
         self.start_positioning()
+
+    # ... (skip to on_drag) ...
+
+    def on_drag(self, event):
+        x = self.winfo_x() - self._drag_start_x + event.x
+        y = self.winfo_y() - self._drag_start_y + event.y
+        self.geometry(f"+{x}+{y}")
+        
+        # タイマーなども追従させる
+        try:
+            if self.timer_window and self.timer_window.winfo_exists():
+                self.timer_window.align_to_mascot(x, y)
+                
+            if self.current_bubble and self.current_bubble.winfo_exists():
+                self.current_bubble.align_to_parent(x, y)
+        except: pass
         
         if self.show_character:
             self.deiconify()
@@ -220,6 +604,22 @@ class MascotApp(ctk.CTk):
 
         # 監視開始
         self.start_monitoring()
+
+    def load_custom_image(self):
+        if os.path.exists(self.custom_image_path):
+            try:
+                img = Image.open(self.custom_image_path).convert("RGBA")
+                # リサイズ
+                img.thumbnail((180, 240), Image.Resampling.LANCZOS)
+                self.custom_image = ctk.CTkImage(light_image=img, dark_image=img, size=img.size)
+            except Exception as e:
+                print(f"Failed to load custom image: {e}")
+                self.custom_image = None
+                
+    def reset_custom_image(self):
+        self.custom_image_path = ""
+        self.custom_image = None
+        self.update_character_image("neutral")
 
     def load_images(self):
         size = (180, 240) # マスコットサイズ
@@ -243,11 +643,23 @@ class MascotApp(ctk.CTk):
         self.current_mode = "作業中"
         self.interval_minutes = 5
         self.show_character = True
+        self.custom_image_path = ""
         
         if os.path.exists("api_key.txt"):
             try:
-                with open("api_key.txt", "r") as f:
-                    self.api_key = f.read().strip()
+                with open("api_key.txt", "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    if len(lines) > 0: self.api_key = lines[0].strip()
+            except: pass
+        
+        if os.path.exists("settings.json"):
+            try:
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.current_mode = data.get("current_mode", "作業中")
+                    self.interval_minutes = data.get("interval_minutes", 5)
+                    self.show_character = data.get("show_character", True)
+                    self.custom_image_path = data.get("custom_image_path", "")
             except: pass
 
     def start_positioning(self):
@@ -260,14 +672,140 @@ class MascotApp(ctk.CTk):
         self._drag_start_x = 0
         self._drag_start_y = 0
 
-    def on_click(self, event):
+    def on_click_start(self, event):
         # ドラッグ開始位置記録
         self._drag_start_x = event.x
         self._drag_start_y = event.y
-        # シングルクリック判定は難しいが、ドラッグ移動しなければクリックとみなすロジックが必要
-        # 簡易的に設定画面を開く機能は右クリックメニュー等にする手もあるが、
-        # ここでは「離した位置が変わってなければクリック」とする
         self._click_start_pos = (self.winfo_x(), self.winfo_y())
+        self._click_time = time.time()
+        
+        # なでなで (Petting) アニメーション開始 (クリックした瞬間沈む)
+        self.animate_petting_start()
+
+    def on_double_click(self, event):
+        # ダブルクリックイベント発生時
+        if hasattr(self, "_click_timer") and self._click_timer:
+             self.after_cancel(self._click_timer) # シングルクリックのアクションをキャンセル
+             self._click_timer = None
+        
+        self.open_settings()
+
+    def perform_single_click_action(self):
+        # シングルクリック確定時の処理: なでなで
+        self.spawn_hearts()
+        self._click_timer = None
+
+    def on_drag(self, event):
+        # マウスドラッグ移動
+        try:
+            # 座標計算 (画面上の絶対位置)
+            new_x = int(self.winfo_x() - self._drag_start_x + event.x)
+            new_y = int(self.winfo_y() - self._drag_start_y + event.y)
+            
+            self.geometry(f"+{new_x}+{new_y}")
+            
+            # タイマーウィンドウなどの追従
+            if self.timer_window and self.timer_window.winfo_exists():
+                self.timer_window.align_to_mascot(new_x, new_y)
+                
+            if self.current_bubble and self.current_bubble.winfo_exists():
+                self.current_bubble.align_to_parent(new_x, new_y)
+                
+        except Exception as e:
+            print(f"Drag Error: {e}")
+
+    def on_drop(self, event):
+        cur_pos = (self.winfo_x(), self.winfo_y())
+        
+        # 沈んだ分戻す
+        try:
+            if cur_pos == self._click_start_pos or (cur_pos[1] - self._click_start_pos[1] == 3):
+                 x = self.winfo_x()
+                 y = self.winfo_y() - 3
+                 self.geometry(f"+{x}+{y}")
+        except: pass
+
+        # クリック判定
+        dist = ((cur_pos[0] - self._click_start_pos[0])**2 + (cur_pos[1] - self._click_start_pos[1])**2)**0.5
+        if dist < 10:
+             # シングルクリックかダブルクリックか判定待ち
+             if hasattr(self, "_click_timer") and self._click_timer:
+                 self.after_cancel(self._click_timer)
+             
+             self._click_timer = self.after(250, self.perform_single_click_action)
+
+    def load_images(self):
+        size = (180, 240) # マスコットサイズ
+        emotions = ["neutral", "happy", "angry"]
+        for emotion in emotions:
+            path = f"assets/{emotion}.png"
+            if os.path.exists(path):
+                try:
+                    # 背景透過のためにRGBA変換
+                    pil_img = Image.open(path).convert("RGBA")
+                    # リサイズ
+                    pil_img = pil_img.resize(size, Image.Resampling.LANCZOS)
+                    self.images[emotion] = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
+                except:
+                    self.images[emotion] = None
+            else:
+                self.images[emotion] = None
+
+    def load_settings(self):
+        self.api_key = ""
+        self.current_mode = "作業中"
+        self.interval_minutes = 5
+        self.show_character = True
+        self.custom_image_path = ""
+        
+        if os.path.exists("api_key.txt"):
+            try:
+                with open("api_key.txt", "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    if len(lines) > 0: self.api_key = lines[0].strip()
+                    # 簡易的な設定保存（JSONにしたほうがいいが、既存互換性維持のため追記形式等は避ける）
+                    # 今回は custom_settings.json を別途作る方針に切り替えるか、api_key.txt はキーだけにして
+                    # settings.json を作るのが筋だが、既存実装があるので settings.json を追加ロードする
+            except: pass
+        
+        if os.path.exists("settings.json"):
+            try:
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.current_mode = data.get("current_mode", "作業中")
+                    self.interval_minutes = data.get("interval_minutes", 5)
+                    self.show_character = data.get("show_character", True)
+                    self.custom_image_path = data.get("custom_image_path", "")
+            except: pass
+
+    def start_positioning(self):
+        # 画面右下に配置
+        screen_width = self.winfo_screenwidth()
+        screen_height = self.winfo_screenheight()
+        x = screen_width - 220
+        y = screen_height - 300
+        self.geometry(f"+{x}+{y}")
+        self._drag_start_x = 0
+        self._drag_start_y = 0
+
+    def on_click_start(self, event):
+        # ドラッグ開始位置記録
+        self._drag_start_x = event.x
+        self._drag_start_y = event.y
+        self._click_start_pos = (self.winfo_x(), self.winfo_y())
+        self._click_time = time.time()
+        
+        # なでなで (Petting) アニメーション開始
+        self.animate_petting_start()
+
+    def animate_petting_start(self):
+        # 少し沈むアニメーション (Y座標を少し下げる)
+        # 実際にはウィンドウ移動ではなく、画像ラベルのpadding等で表現するのが安全だが、
+        # ここでは簡易的にウィンドウを1-2px動かすか、画像を一瞬小さくする
+        # CTkImageはサイズ変更重いので、ウィンドウを一瞬下げる
+        x = self.winfo_x()
+        y = self.winfo_y() + 3
+        self.geometry(f"+{x}+{y}")
 
     def on_drag(self, event):
         x = self.winfo_x() - self._drag_start_x + event.x
@@ -276,25 +814,123 @@ class MascotApp(ctk.CTk):
 
     def on_drop(self, event):
         cur_pos = (self.winfo_x(), self.winfo_y())
-        if cur_pos == self._click_start_pos:
-            self.open_settings()
+        
+        # なでなで終了アニメ
+        if cur_pos == self._click_start_pos or (cur_pos[1] - self._click_start_pos[1] == 3): # 沈んだ分戻す
+             x = self.winfo_x()
+             y = self.winfo_y() - 3
+             self.geometry(f"+{x}+{y}")
+
+        # クリック判定 (移動がほとんどなく、時間が短ければクリック)
+        # 位置判定は animate_petting でずれてる可能性あるので、開始位置周辺ならOKとする
+        dist = ((cur_pos[0] - self._click_start_pos[0])**2 + (cur_pos[1] - self._click_start_pos[1])**2)**0.5
+        if dist < 10:
+            if time.time() - self._click_time < 0.3: # 短いクリックなら設定を開く
+                self.open_settings()
+            else:
+                 # 長押しorなでなで完了としてハートを出す
+                 self.spawn_hearts()
+                 
+    def spawn_hearts(self):
+        # ハートをいくつか出す
+        import random
+        base_x = self.winfo_x() + self.winfo_width() // 2
+        base_y = self.winfo_y() + 50
+        
+        for _ in range(3):
+            off_x = random.randint(-40, 40)
+            off_y = random.randint(-10, 10)
+            HeartWindow(self, base_x + off_x, base_y + off_y)
+
+    # Timer Implementation
+    def start_pomodoro(self, minutes):
+        if not self.timer_running:
+            if self.timer_seconds == 0: # 新規スタート
+                self.timer_seconds = minutes * 60
+            
+            self.timer_running = True
+            
+            # タイマーウィンドウ表示
+            if self.timer_window is None or not self.timer_window.winfo_exists():
+                self.timer_window = TimerDisplay(self)
+                self.timer_window.align_to_mascot()  # 初回位置合わせ
+            
+            self.timer_window.deiconify()
+            self.update_timer()
+            
+            # セリフ
+            msg = "よし、集中しよう！" if minutes > 10 else "少し休もう！"
+            SpeechBubble(self, msg, "happy")
+            self.update_character_image("happy")
+
+    def pause_pomodoro(self):
+        self.timer_running = False
+        SpeechBubble(self, "一時停止中...", "neutral")
+
+    def reset_pomodoro(self):
+        self.timer_running = False
+        self.timer_seconds = 0
+        if self.timer_window and self.timer_window.winfo_exists():
+            self.timer_window.withdraw() # 隠す
+            
+    def update_timer(self):
+        if not self.timer_running:
+            return
+            
+        if self.timer_seconds > 0:
+            self.timer_seconds -= 1
+            
+            # 表示更新
+            mins = self.timer_seconds // 60
+            secs = self.timer_seconds % 60
+            time_str = f"{mins:02}:{secs:02}"
+            
+            if self.timer_window and self.timer_window.winfo_exists():
+                # 色分け: 残り1分切ったら赤
+                color = "white"
+                if self.timer_seconds < 60: color = "#ff5e62"
+                self.timer_window.update_time(time_str, color)
+            
+            # 1秒後に再帰呼び出し in Main Thread
+            self.after(1000, self.update_timer)
+        else:
+            # タイマー終了
+            self.timer_running = False
+            self.timer_window.update_time("00:00", "red")
+            
+            # 通知
+            SpeechBubble(self, "時間だよ！お疲れ様！", "happy")
+            self.update_character_image("happy")
+            
+            # 音を鳴らしてもいいが、とりあえずトースト通知も出す
+            try:
+                VerifyNotification(app_id="Moti-Mate", title="Timer Finished", msg="時間になりました！", icon=os.path.abspath("assets/happy.png")).show()
+            except: pass
 
     def open_settings(self):
         SettingsWindow(self)
 
     def apply_settings(self):
+        if self.custom_image_path:
+            self.load_custom_image()
+            
         if self.show_character:
             self.deiconify()
         else:
             self.withdraw()
-        # 監視再起動などはループ内で変数を参照しているので自動適用される
+            
+        self.update_character_image("neutral") # 画像更新反映
 
     def update_character_image(self, emotion):
-        img = self.images.get(emotion)
-        if img:
-            self.image_label.configure(image=img)
+        if self.custom_image:
+            # カスタム画像がある場合はそれを優先（表情差分がないので固定）
+            self.image_label.configure(image=self.custom_image, text="")
         else:
-            self.image_label.configure(image=None, text=f"({emotion})")
+            img = self.images.get(emotion)
+            if img:
+                self.image_label.configure(image=img, text="")
+            else:
+                self.image_label.configure(image=None, text=f"({emotion})")
 
     def start_monitoring(self):
         if self.monitor_thread and self.monitor_thread.is_alive():
@@ -303,27 +939,50 @@ class MascotApp(ctk.CTk):
         self.monitor_thread = threading.Thread(target=self.monitoring_loop, daemon=True)
         self.monitor_thread.start()
 
+    def log_debug(self, msg):
+        try:
+            with open("debug.log", "a", encoding="utf-8") as f:
+                f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}\n")
+        except: pass
+
     def monitoring_loop(self):
+        self.log_debug("Monitoring loop started.")
         # 起動直後にも一回実行する（ただしAPIキーがある場合）
         if self.api_key:
              self.process_with_ai()
 
         while self.monitoring:
+            # 実行間隔を都度確認
             interval_sec = self.interval_minutes * 60
-            next_time = time.time() + interval_sec
+            self.log_debug(f"Next run in {interval_sec} seconds...")
             
-            # 待機
-            while time.time() < next_time:
-                if not self.monitoring: return
+            # 待機 (1秒ごとにチェックし、設定変更にも追従)
+            slept = 0
+            while slept < interval_sec:
+                if not self.monitoring: 
+                    self.log_debug("Monitoring stopped.")
+                    return
+                
+                # 設定が変更されたかチェック
+                current_interval_sec = self.interval_minutes * 60
+                if current_interval_sec != interval_sec:
+                    self.log_debug(f"Interval changed from {interval_sec} to {current_interval_sec}. Resetting wait.")
+                    interval_sec = current_interval_sec
+                    slept = 0 # リセット（または調整）
+                
                 time.sleep(1)
+                slept += 1
             
             if not self.api_key:
+                self.log_debug("No API Key, skipping.")
                 continue
 
             # 実行
+            self.log_debug("Executing process_with_ai...")
             self.process_with_ai()
 
     def process_with_ai(self):
+        self.log_debug(f"process_with_ai called. Mode: {self.current_mode}")
         try:
             # スクショ
             img = ImageGrab.grab()
@@ -374,10 +1033,23 @@ class MascotApp(ctk.CTk):
             # 吹き出し表示
             SpeechBubble(self, message, emotion)
         else:
-            # トースト通知
+            # トースト通知 (winotify)
             try:
-                self.toaster.show_toast("Motivation Mate", f"({emotion}) {message}", duration=5, icon_path="assets/icon.ico" if os.path.exists("assets/icon.ico") else None, threaded=True)
-            except: pass
+                icon_path = os.path.abspath(f"assets/{emotion}.png")
+                if not os.path.exists(icon_path):
+                    icon_path = os.path.abspath("assets/neutral.png")
+                
+                toast = VerifyNotification(
+                    app_id="Moti-Mate",
+                    title="Motivation Mate",
+                    msg=message,
+                    icon=icon_path
+                )
+                toast.show()
+                self.log_debug("Toast notification sent.")
+            except Exception as e:
+                self.log_debug(f"Notification error: {e}")
+                print(f"Notification error: {e}")
 
     def save_log(self, emotion, message):
         try:

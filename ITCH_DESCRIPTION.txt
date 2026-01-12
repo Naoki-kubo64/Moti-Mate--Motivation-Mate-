@@ -1,0 +1,31 @@
+Motivation Mate - AI Desktop Companion
+========================================
+
+Boost your productivity with a cute AI companion!
+
+**Motivation Mate** is a desktop mascot application that monitors your activity and keeps you focused on your goals. Powered by Google's Gemini AI, it "sees" what you are working on and provides personalized encouragement (or gentle scolding!) to help you stay productive.
+
+### Key Features
+
+*   **👀 AI-Powered Monitoring**: Periodically analyzes your screen to check if you are working towards your set goals.
+*   **💬 Dynamic Feedback**: The mascot reacts with different emotions (Happy, Angry, Neutral) and unique messages based on your activity.
+*   **✨ Seamless Design**: Features a transparent, borderless window that sits comfortably on your desktop without getting in the way.
+*   **⚙️ Fully Customizable**: Set your specific goal (e.g., "Studying for exams", "Coding") and adjust the feedback interval.
+*   **🔔 Non-Intrusive**: Can be minimized to the system tray, sending unobtrusive notifications when you need a nudge.
+
+### How to Use
+
+1.  Launch `MotivationMate.exe`.
+2.  Click the mascot to open **Settings**.
+3.  Enter your **Gemini API Key** (Free from Google AI Studio).
+4.  Set your **Current Mode** (e.g., "Writing a report").
+5.  Let Motivation Mate do the rest!
+
+### Requirements
+
+*   Windows 10/11
+*   Internet Connection (for AI analysis)
+*   Google Gemini API Key
+
+---
+*Created with Python & CustomTkinter.*

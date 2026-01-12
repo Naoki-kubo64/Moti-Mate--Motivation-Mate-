@@ -2,4 +2,5 @@ customtkinter
 pillow
 google-generativeai
 pystray
-win10toast
+winotify
+pyinstaller
