@@ -35,11 +35,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # --- 全体設定 ---
-        ctk.CTkLabel(self.scroll_frame, text="Gemini API Key:", font=("Arial", 12, "bold")).pack(pady=(10, 5))
-        self.entry_api = ctk.CTkEntry(self.scroll_frame, width=300, show="*")
-        self.entry_api.pack(pady=5)
-        if self.parent.api_key:
-            self.entry_api.insert(0, self.parent.api_key)
+        # API Key is now managed via secrets.py (embedded), so no UI needed.
 
         # タブビュー作成 (スクロールフレームの中に入れる)
         self.tabview = ctk.CTkTabview(self.scroll_frame, width=360)
@@ -140,7 +136,7 @@ class SettingsWindow(ctk.CTkToplevel):
         self.update_timer_display_preview()
 
     def run_test_analysis(self):
-        self.parent.api_key = self.entry_api.get().strip()
+        # self.parent.api_key は secrets.py から読まれているので更新不要
         self.parent.current_mode = self.entry_mode.get().strip()
         threading.Thread(target=self.parent.process_with_ai, daemon=True).start()
         self.textbox_log.configure(state="normal")
@@ -173,13 +169,8 @@ class SettingsWindow(ctk.CTkToplevel):
         pass
 
     def save_and_close(self):
-        self.parent.api_key = self.entry_api.get().strip()
-        self.parent.current_mode = self.entry_mode.get().strip()
-        self.parent.interval_minutes = int(self.slider_interval.get())
-        self.parent.show_character = bool(self.switch_show.get())
         
-        with open("api_key.txt", "w", encoding="utf-8") as f:
-            f.write(self.parent.api_key)
+        # APIキーは secrets.py 管理なので api_key.txt への書き出しは不要
             
         settings = {
             "current_mode": self.parent.current_mode,
@@ -192,124 +183,6 @@ class SettingsWindow(ctk.CTkToplevel):
             
         self.parent.apply_settings()
         self.destroy()
-        # タブ作成
-        self.tabview = ctk.CTkTabview(self, width=380, height=480)
-        self.tabview.pack(padx=10, pady=10, fill="both", expand=True)
-        
-        self.tab_settings = self.tabview.add("設定")
-        self.tab_timer = self.tabview.add("タイマー")
-        self.tab_history = self.tabview.add("履歴")
-        
-        # --- 設定タブ ---
-        # API Key
-        ctk.CTkLabel(self.tab_settings, text="Gemini API Key:").pack(pady=(10, 5))
-        self.entry_api = ctk.CTkEntry(self.tab_settings, width=300, show="*")
-        self.entry_api.pack()
-        if self.parent.api_key:
-            self.entry_api.insert(0, self.parent.api_key)
-
-        # Mode
-        # スクロール可能なフレームを作成
-        self.scroll_frame = ctk.CTkScrollableFrame(self, width=380, height=480)
-        self.scroll_frame.pack(fill="both", expand=True, padx=10, pady=10)
-
-        ctk.CTkLabel(self.scroll_frame, text="Gemini API Key:", font=("Arial", 12, "bold")).pack(pady=(10, 5))
-        self.entry_api = ctk.CTkEntry(self.scroll_frame, width=300, show="*")
-        self.entry_api.insert(0, self.parent.api_key)
-        self.entry_api.pack(pady=5)
-        
-        # Tabs for detailed settings
-        self.tabview = ctk.CTkTabview(self.scroll_frame, width=350)
-        self.tabview.pack(pady=10)
-        self.tabview.add("設定")
-        self.tabview.add("タイマー")
-        self.tabview.add("履歴")
-        
-        self.tab_settings = self.tabview.tab("設定")
-        self.tab_timer = self.tabview.tab("タイマー")
-        self.tab_history = self.tabview.tab("履歴")
-
-        # --- Settings Tab ---
-        ctk.CTkLabel(self.tab_settings, text="現在のモード（行動内容）:").pack(pady=(10, 5))
-        self.entry_mode = ctk.CTkEntry(self.tab_settings, width=250)
-        self.entry_mode.insert(0, self.parent.current_mode)
-        self.entry_mode.pack(pady=5)
-        
-        ctk.CTkLabel(self.tab_settings, text="フィードバック間隔 (分):").pack(pady=(10, 5))
-        self.slider_interval = ctk.CTkSlider(self.tab_settings, from_=1, to=60, number_of_steps=59, command=self.update_interval_label)
-        self.slider_interval.set(self.parent.interval_minutes)
-        self.slider_interval.pack(pady=5)
-        
-        self.label_interval_val = ctk.CTkLabel(self.tab_settings, text=f"{int(self.parent.interval_minutes)}分")
-        self.label_interval_val.pack()
-
-        # Show Character Switch
-        self.switch_show = ctk.CTkSwitch(self.tab_settings, text="デスクトップにキャラを表示", command=self.toggle_character)
-        if self.parent.show_character:
-            self.switch_show.select()
-        else:
-            self.switch_show.deselect()
-        self.switch_show.pack(pady=20)
-
-        # Custom Image Picker
-        ctk.CTkLabel(self.tab_settings, text="カスタム画像 (推し画像):").pack(pady=(10, 5))
-        
-        frm_img = ctk.CTkFrame(self.tab_settings, fg_color="transparent")
-        frm_img.pack()
-        
-        self.btn_image = ctk.CTkButton(frm_img, text="画像を選択...", command=self.select_image, width=120)
-        self.btn_image.pack(side="left", padx=5)
-        
-        self.btn_reset_img = ctk.CTkButton(frm_img, text="リセット", command=self.reset_image, width=80, fg_color="#555")
-        self.btn_reset_img.pack(side="left", padx=5)
-        
-        self.lbl_image_path = ctk.CTkLabel(self.tab_settings, text=os.path.basename(self.parent.custom_image_path) if self.parent.custom_image_path else "未選択", font=("Meiryo", 10))
-        self.lbl_image_path.pack()
-
-        # Test Run Button (outside tabs, inside scroll_frame)
-        ctk.CTkButton(self.scroll_frame, text="今すぐAI診断を実行", command=self.run_test_analysis, fg_color="purple", hover_color="darkmagenta").pack(pady=10)
-
-        # --- Timer Tab ---
-        ctk.CTkLabel(self.tab_timer, text="ポモドーロタイマー", font=("Arial", 14, "bold")).pack(pady=10)
-        
-        self.timer_mode_var = ctk.StringVar(value="work")
-        
-        frm_timer_mode = ctk.CTkFrame(self.tab_timer, fg_color="transparent")
-        frm_timer_mode.pack(pady=5)
-        rb_work = ctk.CTkRadioButton(frm_timer_mode, text="作業 (25分)", variable=self.timer_mode_var, value="work", command=self.update_timer_display_preview)
-        rb_work.pack(side="left", padx=10)
-        rb_break = ctk.CTkRadioButton(frm_timer_mode, text="休憩 (5分)", variable=self.timer_mode_var, value="break", command=self.update_timer_display_preview)
-        rb_break.pack(side="left", padx=10)
-        
-        self.lbl_timer_preview = ctk.CTkLabel(self.tab_timer, text="25:00", font=("Arial", 40, "bold"))
-        self.lbl_timer_preview.pack(pady=20)
-        
-        frm_controls = ctk.CTkFrame(self.tab_timer, fg_color="transparent")
-        frm_controls.pack(pady=10)
-        
-        ctk.CTkButton(frm_controls, text="スタート", command=self.start_timer, width=80, fg_color="#4CAF50").pack(side="left", padx=5)
-        ctk.CTkButton(frm_controls, text="一時停止", command=self.pause_timer, width=80, fg_color="#FFC107").pack(side="left", padx=5)
-        ctk.CTkButton(frm_controls, text="リセット", command=self.reset_timer, width=80, fg_color="#F44336").pack(side="left", padx=5)
-
-        # --- History Tab ---
-        # 簡易的にログを表示 (本来はDBやログファイルから読む)
-        try:
-            if os.path.exists("debug.log"):
-                with open("debug.log", "r", encoding="utf-8") as f:
-                    logs = f.readlines()[-20:] # Last 20 lines
-                    log_text = "".join(logs)
-            else:
-                log_text = "履歴はありません。"
-        except Exception as e:
-            log_text = f"履歴読み込みエラー: {e}"
-            
-        self.txt_history = ctk.CTkTextbox(self.tab_history, width=300, height=300)
-        self.txt_history.insert("0.0", log_text)
-        self.txt_history.configure(state="disabled")
-        self.txt_history.pack(padx=5, pady=5, fill="both", expand=True)
-
-        # Save Button (Outside Tabs, but inside ScrollFrame)
-        ctk.CTkButton(self.scroll_frame, text="保存して閉じる", command=self.save_and_close).pack(pady=20)
 
     def select_image(self):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.gif")])
@@ -639,18 +512,17 @@ class MascotApp(ctk.CTk):
                 self.images[emotion] = None
 
     def load_settings(self):
-        self.api_key = ""
+        try:
+            import secrets
+            self.api_key = secrets.GEMINI_API_KEY
+        except ImportError:
+            self.api_key = ""
+            print("Warning: secrets.py not found. API functionality will be limited.")
+
         self.current_mode = "作業中"
         self.interval_minutes = 5
         self.show_character = True
         self.custom_image_path = ""
-        
-        if os.path.exists("api_key.txt"):
-            try:
-                with open("api_key.txt", "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                    if len(lines) > 0: self.api_key = lines[0].strip()
-            except: pass
         
         if os.path.exists("settings.json"):
             try:
