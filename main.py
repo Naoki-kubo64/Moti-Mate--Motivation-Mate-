@@ -438,32 +438,24 @@ class MascotApp(ctk.CTk):
             if self.show_character:
                 # キャラ表示中は吹き出し
                 self.show_bubble("時間だよ！お疲れ様！", "happy")
-                # 念のため既存のWinotifyも残すか、あるいは吹き出しだけで十分か。
-                # 要件「既存の処理を維持」に従い、既存コードにあったWinotifyは「吹き出しがあるなら不要」と解釈し、
-                # ここでは吹き出しのみにする（またはユーザー体験向上のため両方出すのもありだが、今回は分岐させる）
-                # しかし、元のコードでは常にWinotifyが出ていたので、それは邪魔だったかもしれない。
-                # 分岐させることが目的。
             else:
-                # キャラ非表示 -> Windows通知 (plyer)
+                # キャラ非表示 -> Windows通知 (Winotifyを使用)
                 try:
-                    from plyer import notification
+                    # Winotify (VerifyNotification) は main.py 冒頭で import 済み
+                    # iconは assets/icon.ico または happy.png を使う
                     icon_path = os.path.abspath("assets/icon.ico")
                     if not os.path.exists(icon_path):
-                        icon_path = None
+                        icon_path = os.path.abspath("assets/happy.png")
                     
-                    notification.notify(
-                        title="Moti-Mate Timer",
-                        message=msg,
-                        app_name="Moti-Mate",
-                        app_icon=icon_path,
-                        timeout=10
+                    toast = VerifyNotification(
+                        app_id="Moti-Mate",
+                        title="Timer Finished",
+                        msg=msg,
+                        icon=icon_path
                     )
+                    toast.show()
                 except Exception as e:
-                    print(f"Plyer notification failed: {e}")
-                    # Fallback to winotify if plyer fails
-                    try:
-                        VerifyNotification(app_id="Moti-Mate", title="Timer Finished", msg=msg, icon=os.path.abspath("assets/happy.png")).show()
-                    except: pass
+                    print(f"Notification failed: {e}")
 
     def load_custom_image(self):
         if os.path.exists(self.custom_image_path):
