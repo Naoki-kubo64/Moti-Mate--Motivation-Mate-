@@ -736,11 +736,27 @@ class MascotApp(ctk.CTk):
             text = response.text.strip()
             
             import re
+            # Markdownのコードブロック記法などを削除
+            text = re.sub(r'^```json\s*', '', text, flags=re.MULTILINE)
+            text = re.sub(r'^```\s*', '', text, flags=re.MULTILINE)
+            text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
+            
+            # {} で囲まれた部分を抽出
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
                 text = match.group(0)
             
-            data = json.loads(text)
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                # シングルクォート等でPython辞書として返ってきた場合のフォールバック
+                try:
+                    import ast
+                    data = ast.literal_eval(text)
+                except:
+                    # それでもダメならエラーログを出して終了（元の例外を再送出させてもよいが、ここではsafetyに）
+                    print(f"JSON Parse Error. Raw text: {text}")
+                    data = {"emotion": "neutral", "message": f"（AI応答の解析に失敗しました…）\n{text[:20]}..."}
             
             emotion = data.get("emotion", "neutral")
             message = data.get("message", "...")
