@@ -24,94 +24,162 @@ class SettingsWindow(ctk.CTkToplevel):
         super().__init__(parent)
         self.parent = parent
         self.title("設定 - Motivation Mate")
-        self.geometry("420x600")
+        # サイズを少し大きくする
+        self.geometry("480x650")
         self.attributes("-topmost", True)
+        
+        # フォント設定 (モダンな雰囲気)
+        self.font_main = ("Meiryo UI", 12)
+        self.font_bold = ("Meiryo UI", 12, "bold")
+        self.font_small = ("Meiryo UI", 10)
+        
+        # 全体を白/明るいテーマに強制 (ユーザー要望)
+        ctk.set_appearance_mode("Light") 
         
         self.create_widgets()
 
     def create_widgets(self):
-        # メインのスクロールフレーム作成
-        self.scroll_frame = ctk.CTkScrollableFrame(self, width=400, height=580)
-        self.scroll_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        # メインコンテナ (パディングで余白確保)
+        main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        # --- 全体設定 ---
-        # API Key is now managed via secrets.py (embedded), so no UI needed.
+        # タブビュー
+        self.tabview = ctk.CTkTabview(main_frame, width=440)
+        self.tabview.pack(fill="both", expand=True)
+        self.tabview.add("基本設定")      # General
+        self.tabview.add("AI設定")        # Intelligence
+        self.tabview.add("表示・通知")    # Appearance
 
-        # タブビュー作成 (スクロールフレームの中に入れる)
-        self.tabview = ctk.CTkTabview(self.scroll_frame, width=360)
-        self.tabview.pack(pady=10)
+        self.setup_general_tab()
+        self.setup_intelligence_tab()
+        self.setup_appearance_tab()
+
+        # フッター (保存・キャンセル)
+        frm_footer = ctk.CTkFrame(main_frame, fg_color="transparent", height=50)
+        frm_footer.pack(fill="x", side="bottom", pady=(10, 0))
         
-        self.tab_settings = self.tabview.add("設定")
-        self.tab_timer = self.tabview.add("タイマー")
-        self.tab_history = self.tabview.add("履歴")
+        btn_save = ctk.CTkButton(frm_footer, text="保存して閉じる", command=self.save_and_close, 
+                                 font=self.font_bold, fg_color="#4CAF50", hover_color="#45a049", height=40)
+        btn_save.pack(side="right", padx=10)
         
-        # --- [タブ] 設定 ---
-        ctk.CTkLabel(self.tab_settings, text="現在のモード (目標/作業内容):").pack(pady=(10, 5))
-        self.entry_mode = ctk.CTkEntry(self.tab_settings, width=250)
-        self.entry_mode.pack(pady=5)
+        btn_cancel = ctk.CTkButton(frm_footer, text="キャンセル", command=self.destroy,
+                                   font=self.font_main, fg_color="#999999", hover_color="#777777", height=40)
+        btn_cancel.pack(side="right", padx=0)
+
+    def setup_general_tab(self):
+        tab = self.tabview.tab("基本設定")
+        
+        # 目標設定
+        frm_goal = ctk.CTkFrame(tab, fg_color="transparent")
+        frm_goal.pack(fill="x", pady=10)
+        ctk.CTkLabel(frm_goal, text="現在の目標 (モード):", font=self.font_bold).pack(anchor="w")
+        self.entry_mode = ctk.CTkEntry(frm_goal, font=self.font_main, height=35)
+        self.entry_mode.pack(fill="x", pady=(5, 0))
         if self.parent.current_mode:
             self.entry_mode.insert(0, self.parent.current_mode)
+            
+        # タイマー設定 (LabelFrame風)
+        frm_timer = ctk.CTkFrame(tab, border_width=1, border_color="#DDDDDD", fg_color="white")
+        frm_timer.pack(fill="x", pady=20, padx=5, ipady=10)
+        ctk.CTkLabel(frm_timer, text="ポモドーロ設定", font=self.font_bold).pack(anchor="w", padx=10, pady=5)
         
-        ctk.CTkLabel(self.tab_settings, text="AIフィードバック間隔 (分):").pack(pady=(10, 5))
-        self.slider_interval = ctk.CTkSlider(self.tab_settings, from_=1, to=60, number_of_steps=59, command=self.update_interval_label)
+        # 作業時間
+        frm_work = ctk.CTkFrame(frm_timer, fg_color="transparent")
+        frm_work.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(frm_work, text="作業時間 (分):", font=self.font_main, width=100).pack(side="left")
+        self.slider_work = ctk.CTkSlider(frm_work, from_=1, to=60, number_of_steps=59, command=lambda v: self.lbl_work_val.configure(text=f"{int(v)}分"))
+        self.slider_work.set(self.parent.work_minutes)
+        self.slider_work.pack(side="left", fill="x", expand=True, padx=10)
+        self.lbl_work_val = ctk.CTkLabel(frm_work, text=f"{int(self.parent.work_minutes)}分", font=self.font_main, width=40)
+        self.lbl_work_val.pack(side="left")
+
+        # 休憩時間
+        frm_break = ctk.CTkFrame(frm_timer, fg_color="transparent")
+        frm_break.pack(fill="x", padx=10, pady=5)
+        ctk.CTkLabel(frm_break, text="休憩時間 (分):", font=self.font_main, width=100).pack(side="left")
+        self.slider_break = ctk.CTkSlider(frm_break, from_=1, to=30, number_of_steps=29, command=lambda v: self.lbl_break_val.configure(text=f"{int(v)}分"))
+        self.slider_break.set(self.parent.break_minutes)
+        self.slider_break.pack(side="left", fill="x", expand=True, padx=10)
+        self.lbl_break_val = ctk.CTkLabel(frm_break, text=f"{int(self.parent.break_minutes)}分", font=self.font_main, width=40)
+        self.lbl_break_val.pack(side="left")
+        
+        # AIフィードバック間隔 (Legacy) also helpful
+        ctk.CTkLabel(tab, text="※AIは設定された作業/休憩時間に関わらず、\n　アプリ内のインターバル設定に従って定期診断を行います。", font=self.font_small, text_color="#666").pack(pady=10)
+        
+        self.slider_interval = ctk.CTkSlider(tab, from_=1, to=60, number_of_steps=59, command=lambda v: self.lbl_int_val.configure(text=f"診断間隔: {int(v)}分"))
         self.slider_interval.set(self.parent.interval_minutes)
-        self.slider_interval.pack(pady=5)
-        self.label_interval_val = ctk.CTkLabel(self.tab_settings, text=f"{int(self.parent.interval_minutes)}分")
-        self.label_interval_val.pack()
+        self.slider_interval.pack(fill="x", padx=10, pady=(10,0))
+        self.lbl_int_val = ctk.CTkLabel(tab, text=f"診断間隔: {int(self.parent.interval_minutes)}分", font=self.font_main)
+        self.lbl_int_val.pack()
 
-        # 白背景透過設定
-        self.switch_remove_bg = ctk.CTkSwitch(self.tab_settings, text="カスタム画像の白背景を透過する")
-        if self.parent.remove_white_bg:
-            self.switch_remove_bg.select()
-        else:
-            self.switch_remove_bg.deselect()
-        self.switch_remove_bg.pack(pady=10)
+    def setup_intelligence_tab(self):
+        tab = self.tabview.tab("AI設定")
         
-        # Custom Image Picker
-        ctk.CTkLabel(self.tab_settings, text="カスタム画像 (推し画像):").pack(pady=(10, 5))
-        frm_img = ctk.CTkFrame(self.tab_settings, fg_color="transparent")
-        frm_img.pack()
-        self.btn_image = ctk.CTkButton(frm_img, text="画像を選択...", command=self.select_image, width=120)
-        self.btn_image.pack(side="left", padx=5)
-        self.btn_reset_img = ctk.CTkButton(frm_img, text="リセット", command=self.reset_image, width=80, fg_color="#555")
-        self.btn_reset_img.pack(side="left", padx=5)
-        self.lbl_image_path = ctk.CTkLabel(self.tab_settings, text=os.path.basename(self.parent.custom_image_path) if self.parent.custom_image_path else "未選択", font=("Meiryo", 10))
-        self.lbl_image_path.pack()
-
-        # Show Character Switch
-        self.switch_show = ctk.CTkSwitch(self.tab_settings, text="デスクトップにキャラを表示", command=self.toggle_character)
-        if self.parent.show_character:
-            self.switch_show.select()
-        else:
-            self.switch_show.deselect()
-        self.switch_show.pack(pady=20)
+        # モデル選択
+        ctk.CTkLabel(tab, text="使用モデル:", font=self.font_bold).pack(anchor="w", pady=(10, 5))
+        self.combo_model = ctk.CTkComboBox(tab, values=["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"], font=self.font_main)
+        self.combo_model.set(self.parent.ai_model)
+        self.combo_model.pack(fill="x", pady=5)
         
-        # Test Run Action
-        ctk.CTkButton(self.tab_settings, text="今すぐAI診断を実行", command=self.run_test_analysis, fg_color="purple", hover_color="darkmagenta").pack(pady=10)
-
-        # --- [タブ] タイマー ---
-        self.timer_mode_var = ctk.StringVar(value="work")
-        frm_timer_mode = ctk.CTkFrame(self.tab_timer, fg_color="transparent")
-        frm_timer_mode.pack(pady=10)
-        ctk.CTkRadioButton(frm_timer_mode, text="作業 (25分)", variable=self.timer_mode_var, value="work", command=self.update_timer_display_preview).pack(side="left", padx=10)
-        ctk.CTkRadioButton(frm_timer_mode, text="休憩 (5分)", variable=self.timer_mode_var, value="break", command=self.update_timer_display_preview).pack(side="left", padx=10)
+        # プロンプト設定
+        ctk.CTkLabel(tab, text="システムプロンプト (性格・振る舞い):", font=self.font_bold).pack(anchor="w", pady=(15, 5))
+        self.txt_prompt = ctk.CTkTextbox(tab, font=self.font_main, height=200)
+        self.txt_prompt.pack(fill="both", expand=True, pady=5)
+        self.txt_prompt.insert("0.0", self.parent.system_prompt)
         
-        self.lbl_timer_preview = ctk.CTkLabel(self.tab_timer, text="25:00", font=("Arial", 40, "bold"))
-        self.lbl_timer_preview.pack(pady=20)
+        # テスト実行
+        ctk.CTkButton(tab, text="設定を保存してAI診断テスト", command=self.run_test_analysis, fg_color="#9C27B0", hover_color="#7B1FA2", font=self.font_bold).pack(pady=10)
         
-        frm_controls = ctk.CTkFrame(self.tab_timer, fg_color="transparent")
-        frm_controls.pack(pady=10)
-        ctk.CTkButton(frm_controls, text="スタート", command=self.start_timer, width=80, fg_color="#4CAF50").pack(side="left", padx=5)
-        ctk.CTkButton(frm_controls, text="一時停止", command=self.pause_timer, width=80, fg_color="#FFC107").pack(side="left", padx=5)
-        ctk.CTkButton(frm_controls, text="リセット", command=self.reset_timer, width=80, fg_color="#F44336").pack(side="left", padx=5)
+        # ログ表示用 (簡易)
+        self.textbox_log = ctk.CTkTextbox(tab, height=80, font=self.font_small)
+        self.textbox_log.pack(fill="x", pady=5)
+        self.textbox_log.insert("0.0", "ここにテスト結果等が表示されます...")
+        self.textbox_log.configure(state="disabled")
 
-        # --- [タブ] 履歴 ---
-        self.textbox_log = ctk.CTkTextbox(self.tab_history, width=300, height=300)
-        self.textbox_log.pack(fill="both", expand=True, padx=5, pady=5)
-        self.load_history()
+    def setup_appearance_tab(self):
+        tab = self.tabview.tab("表示・通知")
 
-        # --- 保存ボタン (スクロール内下部) ---
-        ctk.CTkButton(self.scroll_frame, text="保存して閉じる", command=self.save_and_close).pack(pady=20)
+        # 透明度
+        ctk.CTkLabel(tab, text="ウィンドウ透明度:", font=self.font_bold).pack(anchor="w", pady=(10, 5))
+        self.slider_alpha = ctk.CTkSlider(tab, from_=0.1, to=1.0, number_of_steps=90, command=lambda v: self.lbl_alpha.configure(text=f"{int(v*100)}%"))
+        self.slider_alpha.set(self.parent.window_transparency)
+        self.slider_alpha.pack(fill="x", pady=5)
+        self.lbl_alpha = ctk.CTkLabel(tab, text=f"{int(self.parent.window_transparency*100)}%", font=self.font_main)
+        self.lbl_alpha.pack()
+        
+        # スイッチ類
+        self.switch_top = ctk.CTkSwitch(tab, text="常に手前に表示", font=self.font_main)
+        if self.parent.always_on_top: self.switch_top.select()
+        else: self.switch_top.deselect()
+        self.switch_top.pack(anchor="w", pady=10)
+
+        self.switch_notify = ctk.CTkSwitch(tab, text="システム通知を有効化", font=self.font_main)
+        if self.parent.enable_notifications: self.switch_notify.select()
+        else: self.switch_notify.deselect()
+        self.switch_notify.pack(anchor="w", pady=10)
+        
+        self.switch_show = ctk.CTkSwitch(tab, text="キャラクターを表示する", command=self.toggle_character, font=self.font_main)
+        if self.parent.show_character: self.switch_show.select()
+        else: self.switch_show.deselect()
+        self.switch_show.pack(anchor="w", pady=10)
+
+        # カスタム画像
+        frm_img = ctk.CTkFrame(tab, border_width=1, border_color="#DDDDDD", fg_color="white")
+        frm_img.pack(fill="x", pady=20, padx=5, ipady=10)
+        ctk.CTkLabel(frm_img, text="カスタム画像設定", font=self.font_bold).pack(anchor="w", padx=10)
+        
+        self.switch_remove_bg = ctk.CTkSwitch(frm_img, text="白背景を透過 (自動修正)", font=self.font_main)
+        if self.parent.remove_white_bg: self.switch_remove_bg.select()
+        else: self.switch_remove_bg.deselect()
+        self.switch_remove_bg.pack(anchor="w", padx=10, pady=5)
+        
+        btn_img = ctk.CTkButton(frm_img, text="画像ファイルを選択...", command=self.select_image, font=self.font_main, width=150)
+        btn_img.pack(padx=10, pady=5, anchor="w")
+        
+        self.lbl_image_path = ctk.CTkLabel(frm_img, text=os.path.basename(self.parent.custom_image_path) if self.parent.custom_image_path else "未選択", font=self.font_small, text_color="#555")
+        self.lbl_image_path.pack(padx=10, anchor="w")
+        
+        ctk.CTkButton(frm_img, text="リセット", command=self.reset_image, font=self.font_small, fg_color="#777", width=60, height=20).pack(padx=10, pady=5, anchor="w")
 
     def select_image(self):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.gif")])
@@ -124,27 +192,14 @@ class SettingsWindow(ctk.CTkToplevel):
         self.lbl_image_path.configure(text="未選択")
         self.parent.reset_custom_image()
 
-    def update_timer_display_preview(self):
-        mode = self.timer_mode_var.get()
-        if mode == "work":
-            self.lbl_timer_preview.configure(text="25:00")
-        else:
-            self.lbl_timer_preview.configure(text="05:00")
-            
-    def start_timer(self):
-        mode = self.timer_mode_var.get()
-        minutes = 25 if mode == "work" else 5
-        self.parent.start_pomodoro(minutes)
-        
-    def pause_timer(self):
-        self.parent.pause_pomodoro()
-        
-    def reset_timer(self):
-        self.parent.reset_pomodoro()
-        self.update_timer_display_preview()
+    def toggle_character(self):
+        pass
 
     def run_test_analysis(self):
+        # 設定を一時保存的に適用してテスト
         self.parent.current_mode = self.entry_mode.get().strip()
+        self.parent.system_prompt = self.txt_prompt.get("0.0", "end").strip()
+        self.parent.ai_model = self.combo_model.get()
         
         def on_complete(emotion, message):
             self.textbox_log.configure(state="normal")
@@ -155,50 +210,44 @@ class SettingsWindow(ctk.CTkToplevel):
         threading.Thread(target=self.parent.process_with_ai, args=(on_complete,), daemon=True).start()
         
         self.textbox_log.configure(state="normal")
-        self.textbox_log.insert("0.0", f"[{datetime.now().strftime('%H:%M:%S')}] テスト実行リクエスト送信...\n")
+        self.textbox_log.insert("0.0", f"[{datetime.now().strftime('%H:%M:%S')}] テストリクエスト中...\n")
         self.textbox_log.configure(state="disabled")
-
-    def load_history(self):
-        if os.path.exists("activity_log.csv"):
-            try:
-                with open("activity_log.csv", "r", encoding="utf-8-sig") as f:
-                    reader = csv.reader(f)
-                    next(reader, None)
-                    logs = list(reader)
-                    text = ""
-                    for row in reversed(logs[-20:]):
-                        if len(row) >= 4:
-                            ts, mode, emo, msg = row
-                            text += f"[{ts}] ({emo})\n{msg}\n{'-'*30}\n"
-                    self.textbox_log.insert("0.0", text)
-            except Exception as e:
-                self.textbox_log.insert("0.0", f"ログ読み込みエラー: {e}")
-        else:
-            self.textbox_log.insert("0.0", "履歴はまだありません。")
-        self.textbox_log.configure(state="disabled")
-
-    def update_interval_label(self, value):
-        self.label_interval_val.configure(text=f"{int(value)}分")
-
-    def toggle_character(self):
-        pass
 
     def save_and_close(self):
-        # APIキーは secrets.py 管理
         self.parent.current_mode = self.entry_mode.get().strip()
+        self.parent.work_minutes = int(self.slider_work.get())
+        self.parent.break_minutes = int(self.slider_break.get())
         self.parent.interval_minutes = int(self.slider_interval.get())
+        
+        self.parent.ai_model = self.combo_model.get()
+        self.parent.system_prompt = self.txt_prompt.get("0.0", "end").strip()
+        
+        self.parent.window_transparency = float(self.slider_alpha.get())
+        self.parent.always_on_top = bool(self.switch_top.get())
+        self.parent.enable_notifications = bool(self.switch_notify.get())
         self.parent.show_character = bool(self.switch_show.get())
         self.parent.remove_white_bg = bool(self.switch_remove_bg.get())
-        
+
         settings = {
             "current_mode": self.parent.current_mode,
             "interval_minutes": self.parent.interval_minutes,
+            "work_minutes": self.parent.work_minutes,
+            "break_minutes": self.parent.break_minutes,
+            "ai_model": self.parent.ai_model,
+            "system_prompt": self.parent.system_prompt,
+            "window_transparency": self.parent.window_transparency,
+            "always_on_top": self.parent.always_on_top,
+            "enable_notifications": self.parent.enable_notifications,
             "show_character": self.parent.show_character,
             "remove_white_bg": self.parent.remove_white_bg,
             "custom_image_path": self.parent.custom_image_path
         }
-        with open("settings.json", "w", encoding="utf-8") as f:
-            json.dump(settings, f, indent=4, ensure_ascii=False)
+        
+        try:
+            with open("settings.json", "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
             
         self.parent.apply_settings()
         self.destroy()
@@ -532,12 +581,49 @@ class MascotApp(ctk.CTk):
             self.api_key = ""
             print("Warning: secrets.py not found. API functionality will be limited.")
 
+    def load_settings(self):
+        try:
+            import secrets
+            self.api_key = secrets.GEMINI_API_KEY
+        except ImportError:
+            self.api_key = ""
+            print("Warning: secrets.py not found. API functionality will be limited.")
+
+        # デフォルト設定
         self.current_mode = "作業中"
         self.interval_minutes = 5
         self.show_character = True
         self.remove_white_bg = False
         self.custom_image_path = ""
         
+        # UI刷新に伴う新設定
+        self.work_minutes = 25
+        self.break_minutes = 5
+        self.ai_model = "gemini-2.0-flash"
+        self.window_transparency = 1.0
+        self.always_on_top = True
+        self.enable_notifications = True
+        self.system_prompt = """あなたはユーザーの親しいパートナーです。以下のルールに従って、ユーザーのPC画面（現在の状態）と設定された目標を比較し、適切に振る舞ってください。
+
+【判断プロセス】
+1. 画面のスクリーンショットを分析し、ユーザーが「現在何をしているか」を特定してください。
+2. その行動が「ユーザーの目標」に沿っているか（頑張っているか）、逸れているか（サボっているか）を判断してください。
+
+【振る舞いのルール (厳守)】
+- **ケースA: 目標と行動が一致している場合**
+  -> 全力で褒めてください。「えらい！」「その調子！」「すごい集中力！」など、肯定的な言葉でモチベーションを上げてください。
+
+- **ケースB: 目標と行動がズレている場合（サボり、関係ないブラウジング等）**
+  -> 愛のある「お説教」や「怒り」を見せるか、あるいは「目標を思い出して！」と前向きに軌道修正させてください。
+  -> ※単に状況を実況する（「YouTubeを見ていますね」等）のは退屈なので禁止です。
+
+【出力フォーマット】
+以下のJSONフォーマットのみを出力してください。Markdownタグは不要です。
+{{
+    "emotion": "happy", "angry", or "neutral",
+    "message": "50文字以内の台詞（タメ口、感情豊かに、パートナーとして）"
+}}"""
+
         if os.path.exists("settings.json"):
             try:
                 with open("settings.json", "r", encoding="utf-8") as f:
@@ -547,12 +633,28 @@ class MascotApp(ctk.CTk):
                     self.show_character = data.get("show_character", True)
                     self.remove_white_bg = data.get("remove_white_bg", False)
                     self.custom_image_path = data.get("custom_image_path", "")
+                    
+                    self.work_minutes = data.get("work_minutes", 25)
+                    self.break_minutes = data.get("break_minutes", 5)
+                    self.ai_model = data.get("ai_model", "gemini-2.0-flash")
+                    self.window_transparency = data.get("window_transparency", 1.0)
+                    self.always_on_top = data.get("always_on_top", True)
+                    self.enable_notifications = data.get("enable_notifications", True)
+                    # プロンプトは長いので、保存されていた場合のみ上書き
+                    saved_prompt = data.get("system_prompt", "")
+                    if saved_prompt:
+                        self.system_prompt = saved_prompt
             except: pass
 
     def open_settings(self):
         SettingsWindow(self)
 
     def apply_settings(self):
+        # ウィンドウの透明度
+        self.attributes("-alpha", self.window_transparency)
+        # 常に手前に表示
+        self.attributes("-topmost", self.always_on_top)
+            
         if self.custom_image_path:
             self.load_custom_image()
             
@@ -615,7 +717,10 @@ class MascotApp(ctk.CTk):
         try:
             img = ImageGrab.grab()
             genai.configure(api_key=self.api_key)
-            model = genai.GenerativeModel('gemini-2.0-flash')
+            try:
+                model = genai.GenerativeModel(self.ai_model)
+            except:
+                model = genai.GenerativeModel('gemini-2.0-flash')
             
             # タイマーの状態もコンテキストに追加
             timer_status = "タイマー停止中"
@@ -624,34 +729,10 @@ class MascotApp(ctk.CTk):
                 secs = self.timer_seconds % 60
                 timer_status = f"タイマー稼働中 (残り {mins}分{secs}秒)"
 
-            prompt = f"""
-            あなたはユーザーの親しいパートナーです。以下のルールに従って、ユーザーのPC画面（現在の状態）と設定された目標を比較し、適切に振る舞ってください。
-
-            【コンテキスト】
-            ユーザーの現在の目標: {self.current_mode}
-            タイマーの状態: {timer_status}
-
-            【判断プロセス】
-            1. 画面のスクリーンショットを分析し、ユーザーが「現在何をしているか」を特定してください。
-            2. その行動が「ユーザーの目標」に沿っているか（頑張っているか）、逸れているか（サボっているか）を判断してください。
-
-            【振る舞いのルール (厳守)】
-            - **ケースA: 目標と行動が一致している場合**
-              -> 全力で褒めてください。「えらい！」「その調子！」「すごい集中力！」など、肯定的な言葉でモチベーションを上げてください。
+            # システムプロンプトと動的コンテキストの結合
+            full_prompt = f"{self.system_prompt}\n\n【現在コンテキスト(自動挿入)】\nユーザーの現在の目標: {self.current_mode}\nタイマーの状態: {timer_status}"
             
-            - **ケースB: 目標と行動がズレている場合（サボり、関係ないブラウジング等）**
-              -> 愛のある「お説教」や「怒り」を見せるか、あるいは「目標を思い出して！」と前向きに軌道修正させてください。
-              -> ※単に状況を実況する（「YouTubeを見ていますね」等）のは退屈なので禁止です。
-
-            【出力フォーマット】
-            以下のJSONフォーマットのみを出力してください。Markdownタグは不要です。
-            {{
-                "emotion": "happy", "angry", or "neutral",
-                "message": "50文字以内の台詞（タメ口、感情豊かに、パートナーとして）"
-            }}
-            """
-            
-            response = model.generate_content([prompt, img])
+            response = model.generate_content([full_prompt, img])
             text = response.text.strip()
             
             import re
