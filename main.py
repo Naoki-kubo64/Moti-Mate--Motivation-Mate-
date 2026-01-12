@@ -251,38 +251,45 @@ class MascotApp(ctk.CTk):
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.wm_attributes("-transparentcolor", "#000001") 
-        self.config(background="#000001") 
-
-        self.container = ctk.CTkFrame(self, fg_color="#000001", width=400, height=450)
+        # Canvasを使わずFrameとplaceで配置する
+        # 全体コンテナ (透明) - corner_radius=0 で四隅の白いアーティファクトを消す
+        self.container = ctk.CTkFrame(self, fg_color="#000001", width=400, height=450, corner_radius=0)
         self.container.pack(fill="both", expand=True)
 
-        self.mascot_x = 100
+        # キャラクター画像の位置 (少し右に寄せて左に吹き出しスペースを作る)
+        self.mascot_x = 160
         self.mascot_y = 150
         
+        # 画像のロード
         self.images = {}
         self.load_images()
         self.custom_image = None
         if self.custom_image_path:
             self.load_custom_image()
         
+        # 画像ラベル (透明背景)
         self.image_label = ctk.CTkLabel(self.container, text="", fg_color="#000001")
         self.image_label.place(x=self.mascot_x, y=self.mascot_y)
         
+        # イベントバインド (画像をクリック・ドラッグの起点にする)
         self.image_label.bind("<Button-1>", self.on_click_start)
         self.image_label.bind("<B1-Motion>", self.on_drag)
         self.image_label.bind("<ButtonRelease-1>", self.on_click_release)
         self.image_label.bind("<Double-Button-1>", self.on_double_click)
         
+        # 初期状態
         self.update_character_image("neutral")
         self.monitoring = False
         self.monitor_thread = None
         self.lock = threading.Lock()
         
+        # タイマー関連
         self.timer_seconds = 0
         self.timer_running = False
-        self.timer_widget = None
-        self.current_bubble = None
+        self.timer_widget = None # Frame
+        self.current_bubble = None # Frame
 
+        # クリック管理
         self._click_timer = None
         self._drag_trigger = False
 
@@ -290,6 +297,7 @@ class MascotApp(ctk.CTk):
         self.start_monitoring()
 
     def start_positioning(self):
+        # 画面右下に配置
         screen_width = self.winfo_screenwidth()
         screen_height = self.winfo_screenheight()
         x = screen_width - 450
@@ -356,8 +364,10 @@ class MascotApp(ctk.CTk):
         if self.current_bubble and self.current_bubble.winfo_exists():
             self.current_bubble.destroy()
         
-        bx = self.mascot_x + 120
-        by = self.mascot_y - 60
+        # マスコットの左上に出す (位置調整)
+        bx = self.mascot_x - 130
+        by = self.mascot_y - 40
+        
         self.current_bubble = SpeechBubble(self.container, message, emotion)
         self.current_bubble.place(x=bx, y=by)
 
@@ -370,8 +380,9 @@ class MascotApp(ctk.CTk):
             
             if self.timer_widget is None or not self.timer_widget.winfo_exists():
                 self.timer_widget = TimerDisplay(self.container)
-                tx = self.mascot_x + 20
-                ty = self.mascot_y - 50
+                # タイマーはマスコットの右下へ
+                tx = self.mascot_x + 130
+                ty = self.mascot_y + 110
                 self.timer_widget.place(x=tx, y=ty)
                 
             self.timer_widget.lift()
