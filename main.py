@@ -1,24 +1,36 @@
-import warnings
-warnings.filterwarnings("ignore")
 import customtkinter as ctk
+from PIL import Image, ImageTk, ImageGrab, ImageDraw
 import threading
 import time
 import os
 import json
 import csv
 import sys
-from PIL import Image, ImageGrab, ImageTk
-import pystray
-from pystray import MenuItem as item
-from winotify import Notification as VerifyNotification
+from datetime import datetime
+import glob
+import random
 
 import google.generativeai as genai
-from datetime import datetime
+import pystray
+from pystray import MenuItem as item
+from winotify import Notification, audio
+import pygetwindow as gw
 from presets import PERSONALITY_PRESETS
+from locales import TRANSLATIONS
 
 # ライブラリセットアップ
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 class SettingsWindow(ctk.CTkToplevel):
     def __init__(self, parent):
@@ -39,7 +51,14 @@ class SettingsWindow(ctk.CTkToplevel):
         
         self.create_widgets()
 
+    def tr(self, key):
+        lang = getattr(self.parent, "language", "ja")
+        return TRANSLATIONS.get(lang, TRANSLATIONS["ja"]).get(key, key)
+
     def create_widgets(self):
+        # UI構築時の言語を記録 (リフレッシュ判定用)
+        self.current_ui_lang = getattr(self.parent, "language", "ja")
+
         # メインコンテナ (パディングで余白確保)
         main_frame = ctk.CTkFrame(self, fg_color="transparent")
         main_frame.pack(fill="both", expand=True, padx=20, pady=20)
@@ -47,9 +66,9 @@ class SettingsWindow(ctk.CTkToplevel):
         # タブビュー
         self.tabview = ctk.CTkTabview(main_frame, width=440)
         self.tabview.pack(fill="both", expand=True)
-        self.tabview.add("基本設定")      # General
-        self.tabview.add("AI設定")        # Intelligence
-        self.tabview.add("表示・通知")    # Appearance
+        self.tabview.add(self.tr("tab_general"))
+        self.tabview.add(self.tr("tab_ai"))
+        self.tabview.add(self.tr("tab_appearance"))
 
         self.setup_general_tab()
         self.setup_intelligence_tab()
@@ -59,21 +78,45 @@ class SettingsWindow(ctk.CTkToplevel):
         frm_footer = ctk.CTkFrame(main_frame, fg_color="transparent", height=50)
         frm_footer.pack(fill="x", side="bottom", pady=(10, 0))
         
-        btn_save = ctk.CTkButton(frm_footer, text="保存して閉じる", command=self.save_and_close, 
+        btn_save_close = ctk.CTkButton(frm_footer, text=self.tr("btn_save_close"), command=self.save_and_close, 
                                  font=self.font_bold, fg_color="#4CAF50", hover_color="#45a049", height=40)
-        btn_save.pack(side="right", padx=10)
+        btn_save_close.pack(side="right", padx=10)
+
+        btn_apply = ctk.CTkButton(frm_footer, text=self.tr("btn_save"), command=self.save_only, 
+                                 font=self.font_bold, fg_color="#2196F3", hover_color="#1E88E5", height=40)
+        btn_apply.pack(side="right", padx=10)
         
-        btn_cancel = ctk.CTkButton(frm_footer, text="キャンセル", command=self.destroy,
+        btn_cancel = ctk.CTkButton(frm_footer, text=self.tr("btn_cancel"), command=self.destroy,
                                    font=self.font_main, fg_color="#999999", hover_color="#777777", height=40)
         btn_cancel.pack(side="right", padx=0)
 
+    def change_language(self, choice):
+        lang_code = "en" if "English" in choice else "ja"
+        self.parent.language = lang_code
+        # 言語切り替え時は即座に保存して再起動を促すのが親切かもしれないが
+        # ここでは変数更新のみ行い、保存時に確定させる。
+        # UIリフレッシュは閉じて開くまで反映されない。
+
     def setup_general_tab(self):
-        tab = self.tabview.tab("基本設定")
+        tab = self.tabview.tab(self.tr("tab_general"))
+        
+        # Language Selector
+        frm_lang = ctk.CTkFrame(tab, fg_color="transparent")
+        frm_lang.pack(fill="x", pady=(0, 10))
+        ctk.CTkLabel(frm_lang, text=self.tr("lbl_language"), font=self.font_bold).pack(anchor="w")
+        self.combo_lang = ctk.CTkComboBox(frm_lang, values=["Japanese (ja)", "English (en)"], 
+                                          command=self.change_language, font=self.font_main)
+        
+        current_lang = getattr(self.parent, "language", "ja")
+        if current_lang == "en": self.combo_lang.set("English (en)")
+        else: self.combo_lang.set("Japanese (ja)")
+        
+        self.combo_lang.pack(fill="x", pady=(5, 0))
         
         # 目標設定
         frm_goal = ctk.CTkFrame(tab, fg_color="transparent")
         frm_goal.pack(fill="x", pady=10)
-        ctk.CTkLabel(frm_goal, text="現在の目標 (モード):", font=self.font_bold).pack(anchor="w")
+        ctk.CTkLabel(frm_goal, text=self.tr("lbl_goal"), font=self.font_bold).pack(anchor="w")
         self.entry_mode = ctk.CTkEntry(frm_goal, font=self.font_main, height=35)
         self.entry_mode.pack(fill="x", pady=(5, 0))
         if self.parent.current_mode:
@@ -82,12 +125,12 @@ class SettingsWindow(ctk.CTkToplevel):
         # タイマー設定 (LabelFrame風)
         frm_timer = ctk.CTkFrame(tab, border_width=1, border_color="#DDDDDD", fg_color="white")
         frm_timer.pack(fill="x", pady=20, padx=5, ipady=10)
-        ctk.CTkLabel(frm_timer, text="ポモドーロ設定", font=self.font_bold).pack(anchor="w", padx=10, pady=5)
+        ctk.CTkLabel(frm_timer, text=self.tr("lbl_timer_settings"), font=self.font_bold).pack(anchor="w", padx=10, pady=5)
         
         # 作業時間
         frm_work = ctk.CTkFrame(frm_timer, fg_color="transparent")
         frm_work.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(frm_work, text="作業時間 (分):", font=self.font_main, width=100).pack(side="left")
+        ctk.CTkLabel(frm_work, text=self.tr("lbl_work_time"), font=self.font_main, width=100).pack(side="left")
         self.slider_work = ctk.CTkSlider(frm_work, from_=1, to=60, number_of_steps=59, command=lambda v: self.lbl_work_val.configure(text=f"{int(v)}分"))
         self.slider_work.set(self.parent.work_minutes)
         self.slider_work.pack(side="left", fill="x", expand=True, padx=10)
@@ -97,7 +140,7 @@ class SettingsWindow(ctk.CTkToplevel):
         # 休憩時間
         frm_break = ctk.CTkFrame(frm_timer, fg_color="transparent")
         frm_break.pack(fill="x", padx=10, pady=5)
-        ctk.CTkLabel(frm_break, text="休憩時間 (分):", font=self.font_main, width=100).pack(side="left")
+        ctk.CTkLabel(frm_break, text=self.tr("lbl_break_time"), font=self.font_main, width=100).pack(side="left")
         self.slider_break = ctk.CTkSlider(frm_break, from_=1, to=30, number_of_steps=29, command=lambda v: self.lbl_break_val.configure(text=f"{int(v)}分"))
         self.slider_break.set(self.parent.break_minutes)
         self.slider_break.pack(side="left", fill="x", expand=True, padx=10)
@@ -107,32 +150,69 @@ class SettingsWindow(ctk.CTkToplevel):
         # タイマー操作ボタン
         frm_btns = ctk.CTkFrame(frm_timer, fg_color="transparent")
         frm_btns.pack(fill="x", pady=(10, 5), padx=10)
-        ctk.CTkButton(frm_btns, text="▶ 開始", command=lambda: self.parent.start_pomodoro(int(self.slider_work.get())), font=self.font_bold, width=80, height=35, fg_color="#4CAF50", hover_color="#388E3C").pack(side="left", padx=5, expand=True)
-        ctk.CTkButton(frm_btns, text="⏸ 停止", command=self.parent.pause_pomodoro, font=self.font_bold, width=80, height=35, fg_color="#FF9800", hover_color="#F57C00").pack(side="left", padx=5, expand=True)
-        ctk.CTkButton(frm_btns, text="🔄 リセット", command=self.parent.reset_timer, font=self.font_main, fg_color="#777", width=70, height=35).pack(side="left", padx=5)
+        ctk.CTkButton(frm_btns, text=self.tr("btn_start"), command=lambda: self.parent.start_pomodoro(int(self.slider_work.get())), font=self.font_bold, width=80, height=35, fg_color="#4CAF50", hover_color="#388E3C").pack(side="left", padx=5, expand=True)
+        ctk.CTkButton(frm_btns, text=self.tr("btn_pause"), command=self.parent.pause_pomodoro, font=self.font_bold, width=80, height=35, fg_color="#FF9800", hover_color="#F57C00").pack(side="left", padx=5, expand=True)
+        ctk.CTkButton(frm_btns, text=self.tr("btn_end"), command=self.parent.reset_timer, font=self.font_main, fg_color="#D32F2F", hover_color="#B71C1C", width=70, height=35).pack(side="left", padx=5)
         
         # AIフィードバック間隔 (Legacy) also helpful
-        ctk.CTkLabel(tab, text="※AIは設定された作業/休憩時間に関わらず、\n　アプリ内のインターバル設定に従って定期診断を行います。", font=self.font_small, text_color="#666").pack(pady=10)
+        ctk.CTkLabel(tab, text=self.tr("lbl_ai_interval_desc"), font=self.font_small, text_color="#666").pack(pady=10)
         
-        self.slider_interval = ctk.CTkSlider(tab, from_=1, to=60, number_of_steps=59, command=lambda v: self.lbl_int_val.configure(text=f"診断間隔: {int(v)}分"))
+        self.slider_interval = ctk.CTkSlider(tab, from_=1, to=60, number_of_steps=59, command=lambda v: self.lbl_int_val.configure(text=self.tr("lbl_ai_interval").format(int(v))))
         self.slider_interval.set(self.parent.interval_minutes)
         self.slider_interval.pack(fill="x", padx=10, pady=(10,0))
-        self.lbl_int_val = ctk.CTkLabel(tab, text=f"診断間隔: {int(self.parent.interval_minutes)}分", font=self.font_main)
+        self.lbl_int_val = ctk.CTkLabel(tab, text=self.tr("lbl_ai_interval").format(int(self.parent.interval_minutes)), font=self.font_main)
         self.lbl_int_val.pack()
 
     def setup_intelligence_tab(self):
-        tab = self.tabview.tab("AI設定")
+        tab = self.tabview.tab(self.tr("tab_ai"))
+        lang = getattr(self.parent, "language", "ja")
+        # プリセット辞書を取得
+        presets = PERSONALITY_PRESETS.get(lang, PERSONALITY_PRESETS["ja"])
         
+        # API Key Input
+        ctk.CTkLabel(tab, text=self.tr("lbl_api_key"), font=("Meiryo UI", 16, "bold"), text_color="#E0E0E0").pack(pady=(15, 5))
+        
+        self.api_key_entry = ctk.CTkEntry(tab, width=350, placeholder_text=self.tr("placeholder_api_key"), show="*")
+        self.api_key_entry.pack(pady=5)
+        if hasattr(self.parent, 'api_key') and self.parent.api_key:
+            self.api_key_entry.insert(0, self.parent.api_key)
+
+        # Save Button
+        ctk.CTkButton(tab, text=self.tr("btn_save_key"), command=self.save_single_api_key, 
+                      font=("Meiryo UI", 11), fg_color="#009688", hover_color="#00796B", 
+                      width=120, height=28).pack(pady=(2, 10))
+
+        def open_url(event):
+            import webbrowser
+            webbrowser.open("https://aistudio.google.com/app/apikey")
+
+        link = ctk.CTkLabel(tab, text=self.tr("link_get_key"), text_color="#64B5F6", cursor="hand2")
+        link.pack(pady=2)
+        link.bind("<Button-1>", open_url)
+
+        def open_guide(event):
+            import webbrowser
+            # GitHub上のガイドページを開く
+            webbrowser.open("https://github.com/Naoki-kubo64/Moti-Mate--Motivation-Mate-/blob/main/docs/api_key_guide.md")
+
+        link_guide = ctk.CTkLabel(tab, text=self.tr("link_help_key"), text_color="#64B5F6", cursor="hand2", font=("Meiryo UI", 11, "underline"))
+        link_guide.pack(pady=(0, 10))
+        link_guide.bind("<Button-1>", open_guide)
+
+        ctk.CTkLabel(tab, text=self.tr("lbl_model_settings"), font=("Meiryo UI", 14, "bold"), text_color="#E0E0E0").pack(pady=(20, 5))
         
         # 性格プリセット選択
-        ctk.CTkLabel(tab, text="性格・振る舞い (プリセット):", font=self.font_bold).pack(anchor="w", pady=(15, 5))
+        ctk.CTkLabel(tab, text=self.tr("lbl_personality"), font=self.font_bold).pack(anchor="w", pady=(15, 5))
         
         # ラベルとIDの対応作成
-        self.preset_map = {v["label"]: k for k, v in PERSONALITY_PRESETS.items()}
+        self.preset_map = {v["label"]: k for k, v in presets.items()}
         preset_labels = list(self.preset_map.keys())
         
         # 現在のIDからラベルを逆引き
-        current_label = PERSONALITY_PRESETS.get(self.parent.personality_id, PERSONALITY_PRESETS["default"])["label"]
+        current_id = self.parent.personality_id
+        if current_id not in presets: current_id = "default"
+        
+        current_label = presets[current_id]["label"]
         
         self.combo_preset = ctk.CTkComboBox(tab, values=preset_labels, command=self.update_preset_description, font=self.font_main)
         self.combo_preset.set(current_label)
@@ -144,24 +224,27 @@ class SettingsWindow(ctk.CTkToplevel):
         self.update_preset_description(current_label) # 初期表示更新
 
         # テスト実行
-        ctk.CTkButton(tab, text="設定を保存してAI診断テスト", command=self.run_test_analysis, fg_color="#9C27B0", hover_color="#7B1FA2", font=self.font_bold).pack(pady=10)
+        ctk.CTkButton(tab, text=self.tr("btn_test_run"), command=self.run_test_analysis, fg_color="#9C27B0", hover_color="#7B1FA2", font=self.font_bold).pack(pady=10)
         
         # ログ表示用
         self.textbox_log = ctk.CTkTextbox(tab, height=80, font=self.font_small)
         self.textbox_log.pack(fill="x", pady=5)
-        self.textbox_log.insert("0.0", "ここにテスト結果等が表示されます...")
+        self.textbox_log.insert("0.0", self.tr("log_placeholder"))
         self.textbox_log.configure(state="disabled")
 
     def update_preset_description(self, choice):
+        lang = getattr(self.parent, "language", "ja")
+        presets = PERSONALITY_PRESETS.get(lang, PERSONALITY_PRESETS["ja"])
+        
         pid = self.preset_map.get(choice, "default")
-        desc = PERSONALITY_PRESETS[pid]["description"]
+        desc = presets[pid]["description"]
         self.lbl_preset_desc.configure(text=desc)
 
     def setup_appearance_tab(self):
-        tab = self.tabview.tab("表示・通知")
+        tab = self.tabview.tab(self.tr("tab_appearance"))
 
         # 透明度
-        ctk.CTkLabel(tab, text="ウィンドウ透明度:", font=self.font_bold).pack(anchor="w", pady=(10, 5))
+        ctk.CTkLabel(tab, text=self.tr("lbl_transparency"), font=self.font_bold).pack(anchor="w", pady=(10, 5))
         self.slider_alpha = ctk.CTkSlider(tab, from_=0.1, to=1.0, number_of_steps=90, command=lambda v: self.lbl_alpha.configure(text=f"{int(v*100)}%"))
         self.slider_alpha.set(self.parent.window_transparency)
         self.slider_alpha.pack(fill="x", pady=5)
@@ -169,17 +252,17 @@ class SettingsWindow(ctk.CTkToplevel):
         self.lbl_alpha.pack()
         
         # スイッチ類
-        self.switch_top = ctk.CTkSwitch(tab, text="常に手前に表示", font=self.font_main)
+        self.switch_top = ctk.CTkSwitch(tab, text=self.tr("switch_param_top"), font=self.font_main)
         if self.parent.always_on_top: self.switch_top.select()
         else: self.switch_top.deselect()
         self.switch_top.pack(anchor="w", pady=10)
 
-        self.switch_notify = ctk.CTkSwitch(tab, text="システム通知を有効化", font=self.font_main)
+        self.switch_notify = ctk.CTkSwitch(tab, text=self.tr("switch_param_notify"), font=self.font_main)
         if self.parent.enable_notifications: self.switch_notify.select()
         else: self.switch_notify.deselect()
         self.switch_notify.pack(anchor="w", pady=10)
         
-        self.switch_show = ctk.CTkSwitch(tab, text="キャラクターを表示する", command=self.toggle_character, font=self.font_main)
+        self.switch_show = ctk.CTkSwitch(tab, text=self.tr("switch_param_show"), command=self.toggle_character, font=self.font_main)
         if self.parent.show_character: self.switch_show.select()
         else: self.switch_show.deselect()
         self.switch_show.pack(anchor="w", pady=10)
@@ -187,20 +270,24 @@ class SettingsWindow(ctk.CTkToplevel):
         # カスタム画像
         frm_img = ctk.CTkFrame(tab, border_width=1, border_color="#DDDDDD", fg_color="white")
         frm_img.pack(fill="x", pady=20, padx=5, ipady=10)
-        ctk.CTkLabel(frm_img, text="カスタム画像設定", font=self.font_bold).pack(anchor="w", padx=10)
+        ctk.CTkLabel(frm_img, text=self.tr("lbl_custom_image"), font=self.font_bold).pack(anchor="w", padx=10)
         
-        self.switch_remove_bg = ctk.CTkSwitch(frm_img, text="白背景を透過 (自動修正)", font=self.font_main)
+        self.switch_remove_bg = ctk.CTkSwitch(frm_img, text=self.tr("switch_param_bg"), font=self.font_main)
         if self.parent.remove_white_bg: self.switch_remove_bg.select()
         else: self.switch_remove_bg.deselect()
         self.switch_remove_bg.pack(anchor="w", padx=10, pady=5)
         
-        btn_img = ctk.CTkButton(frm_img, text="画像ファイルを選択...", command=self.select_image, font=self.font_main, width=150)
+        btn_img = ctk.CTkButton(frm_img, text=self.tr("btn_select_image"), command=self.select_image, font=self.font_main, width=150)
         btn_img.pack(padx=10, pady=5, anchor="w")
         
-        self.lbl_image_path = ctk.CTkLabel(frm_img, text=os.path.basename(self.parent.custom_image_path) if self.parent.custom_image_path else "未選択", font=self.font_small, text_color="#555")
+        img_text = self.tr("lbl_no_image")
+        if self.parent.custom_image_path:
+            img_text = os.path.basename(self.parent.custom_image_path)
+        
+        self.lbl_image_path = ctk.CTkLabel(frm_img, text=img_text, font=self.font_small, text_color="#555")
         self.lbl_image_path.pack(padx=10, anchor="w")
         
-        ctk.CTkButton(frm_img, text="リセット", command=self.reset_image, font=self.font_small, fg_color="#777", width=60, height=20).pack(padx=10, pady=5, anchor="w")
+        ctk.CTkButton(frm_img, text=self.tr("btn_reset_image"), command=self.reset_image, font=self.font_small, fg_color="#777", width=60, height=20).pack(padx=10, pady=5, anchor="w")
 
     def select_image(self):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.gif")])
@@ -210,7 +297,7 @@ class SettingsWindow(ctk.CTkToplevel):
 
     def reset_image(self):
         self.parent.custom_image_path = ""
-        self.lbl_image_path.configure(text="未選択")
+        self.lbl_image_path.configure(text=self.tr("lbl_no_image"))
         self.parent.reset_custom_image()
 
     def toggle_character(self):
@@ -223,7 +310,11 @@ class SettingsWindow(ctk.CTkToplevel):
         
         # 選択中のプリセットからプロンプトを取得して一時適用
         pid = self.preset_map.get(self.combo_preset.get(), "default")
-        self.parent.system_prompt = PERSONALITY_PRESETS[pid]["system_prompt"]
+        
+        lang = getattr(self.parent, "language", "ja")
+        presets = PERSONALITY_PRESETS.get(lang, PERSONALITY_PRESETS["ja"])
+        
+        self.parent.system_prompt = presets.get(pid, presets["default"])["system_prompt"]
         
         def on_complete(emotion, message):
             self.textbox_log.configure(state="normal")
@@ -237,7 +328,41 @@ class SettingsWindow(ctk.CTkToplevel):
         self.textbox_log.insert("0.0", f"[{datetime.now().strftime('%H:%M:%S')}] テストリクエスト中... ({pid})\n")
         self.textbox_log.configure(state="disabled")
 
-    def save_and_close(self):
+    def save_single_api_key(self):
+        new_key = self.api_key_entry.get().strip()
+        self.parent.api_key = new_key
+        
+        # 現在の設定をすべて取得して保存
+        try:
+            settings = {}
+            if os.path.exists("settings.json"):
+                with open("settings.json", "r", encoding="utf-8") as f:
+                    settings = json.load(f)
+            
+            settings["api_key"] = new_key
+            
+            with open("settings.json", "w", encoding="utf-8") as f:
+                json.dump(settings, f, indent=4, ensure_ascii=False)
+            
+            # 保存完了通知
+            self.focus() # 枠にフォーカス戻す
+            
+        except Exception as e:
+            print(f"Key save error: {e}")
+
+    
+    def refresh_ui(self):
+        # 既存のウィジェットを全て削除
+        for widget in self.winfo_children():
+            widget.destroy()
+        
+        # UI再構築
+        self.create_widgets()
+
+    def save_settings(self, close=True):
+        # API Key
+        self.parent.api_key = self.api_key_entry.get().strip()
+
         self.parent.current_mode = self.entry_mode.get().strip()
         self.parent.work_minutes = int(self.slider_work.get())
         self.parent.break_minutes = int(self.slider_break.get())
@@ -248,7 +373,11 @@ class SettingsWindow(ctk.CTkToplevel):
         # プリセットIDを保存
         pid = self.preset_map.get(self.combo_preset.get(), "default")
         self.parent.personality_id = pid
-        self.parent.system_prompt = PERSONALITY_PRESETS[pid]["system_prompt"]
+        
+        lang = self.parent.language
+        presets = PERSONALITY_PRESETS.get(lang, PERSONALITY_PRESETS["ja"])
+        if pid not in presets: pid = "default"
+        self.parent.system_prompt = presets[pid]["system_prompt"]
         
         self.parent.window_transparency = float(self.slider_alpha.get())
         self.parent.always_on_top = bool(self.switch_top.get())
@@ -257,6 +386,8 @@ class SettingsWindow(ctk.CTkToplevel):
         self.parent.remove_white_bg = bool(self.switch_remove_bg.get())
 
         settings = {
+            "api_key": self.parent.api_key,
+            "language": self.parent.language,
             "current_mode": self.parent.current_mode,
             "interval_minutes": self.parent.interval_minutes,
             "work_minutes": self.parent.work_minutes,
@@ -278,7 +409,21 @@ class SettingsWindow(ctk.CTkToplevel):
             print(f"Error saving settings: {e}")
             
         self.parent.apply_settings()
-        self.destroy()
+        
+        if close:
+            self.destroy()
+        else:
+            # 言語が変更されていたらUIをリフレッシュ
+            # current_ui_lang は create_widgets で設定される
+            current_ui_lang = getattr(self, "current_ui_lang", "ja")
+            if current_ui_lang != self.parent.language:
+                self.refresh_ui()
+
+    def save_and_close(self):
+        self.save_settings(close=True)
+        
+    def save_only(self):
+        self.save_settings(close=False)
 
 class SpeechBubble(ctk.CTkFrame):
     def __init__(self, parent, text, emotion="neutral"):
@@ -381,6 +526,7 @@ class MascotApp(ctk.CTk):
         # タイマー関連
         self.timer_seconds = 0
         self.timer_running = False
+        self.timer_mode = "work"
         self.timer_widget = None # Frame
         self.current_bubble = None # Frame
 
@@ -400,6 +546,10 @@ class MascotApp(ctk.CTk):
         self.geometry(f"+{x}+{y}")
         self._drag_start_x = 0
         self._drag_start_y = 0
+
+    def tr(self, key):
+        lang = getattr(self, "language", "ja")
+        return TRANSLATIONS.get(lang, TRANSLATIONS["ja"]).get(key, key)
     
     def on_click_start(self, event):
         self._drag_start_x = event.x
@@ -466,11 +616,12 @@ class MascotApp(ctk.CTk):
         self.current_bubble = SpeechBubble(self.container, message, emotion)
         self.current_bubble.place(x=bx, y=by)
 
-    def start_pomodoro(self, minutes):
-        if not self.timer_running:
-            if self.timer_seconds == 0:
-                self.timer_seconds = minutes * 60
-            
+    def start_pomodoro(self, minutes, mode="work"):
+        self.timer_mode = mode
+        
+        # 既存タイマーが走ってない、あるいはゼロの場合にセット (Breakへの切り替え時は走っていても強制セットしたいので条件調整)
+        if (not self.timer_running) or mode == "break":
+            self.timer_seconds = minutes * 60
             self.timer_running = True
             
             if self.timer_widget is None or not self.timer_widget.winfo_exists():
@@ -483,9 +634,15 @@ class MascotApp(ctk.CTk):
             self.timer_widget.lift()
             self.update_timer()
             
-            msg = "よし、集中しよう！" if minutes > 10 else "少し休もう！"
-            self.show_bubble(msg, "happy")
-            self.update_character_image("happy")
+            # 開始時メッセージ
+            if mode == "work":
+                msg = self.tr("msg_work_start")
+                self.show_bubble(msg, "happy")
+                self.update_character_image("happy")
+            else:
+                msg = self.tr("msg_rest_start")
+                self.show_bubble(msg, "neutral")
+                self.update_character_image("neutral")
 
     def pause_pomodoro(self):
         self.timer_running = False
@@ -496,6 +653,10 @@ class MascotApp(ctk.CTk):
         self.timer_seconds = 0
         if self.timer_widget:
             self.timer_widget.place_forget()
+        # 吹き出しも消す
+        if self.current_bubble and self.current_bubble.winfo_exists():
+            self.current_bubble.destroy()
+            self.current_bubble = None
 
     def start_monitoring(self):
         if self.monitor_thread and self.monitor_thread.is_alive():
@@ -525,42 +686,63 @@ class MascotApp(ctk.CTk):
             mins = self.timer_seconds // 60
             secs = self.timer_seconds % 60
             time_str = f"{mins:02}:{secs:02}"
+            
             if self.timer_widget and self.timer_widget.winfo_exists():
                 color = "white"
-                if self.timer_seconds < 60: color = "#ff5e62"
+                # モードによる色分け
+                if self.timer_mode == "break":
+                    color = "#69F0AE" # パステルグリーン (休憩)
+                elif self.timer_seconds < 60: 
+                    color = "#FF5252" # 赤 (作業ラスト1分)
+                
                 self.timer_widget.update_time(time_str, color)
             self.after(1000, self.update_timer)
         else:
-            # タイマー終了
-            self.timer_running = False
-            if self.timer_widget and self.timer_widget.winfo_exists():
-                self.timer_widget.update_time("00:00", "red")
+            # タイマー終了時の処理
             
-            self.update_character_image("happy")
-            
-            msg = "時間だよ！お疲れ様！\n休憩が終わったなら、また頑張ろう！"
+            # Work -> Break (自動移行)
+            if self.timer_mode == "work":
+                # 先に通知を出してからタイマー切り替え
+                msg = self.tr("msg_break_start")
+                if self.show_character:
+                    self.show_bubble(msg, "happy")
+                else:
+                    self.send_notification("Break Started", msg)
+                
+                self.update_character_image("happy")
+                
+                # 休憩タイマー開始
+                self.start_pomodoro(self.break_minutes, mode="break")
 
-            if self.show_character:
-                # キャラ表示中は吹き出し
-                self.show_bubble("時間だよ！お疲れ様！", "happy")
+            # Break -> Finish (停止)
             else:
-                # キャラ非表示 -> Windows通知 (Winotifyを使用)
-                try:
-                    # Winotify (VerifyNotification) は main.py 冒頭で import 済み
-                    # iconは assets/icon.ico または happy.png を使う
-                    icon_path = os.path.abspath("assets/icon.ico")
-                    if not os.path.exists(icon_path):
-                        icon_path = os.path.abspath("assets/happy.png")
-                    
-                    toast = VerifyNotification(
-                        app_id="Moti-Mate",
-                        title="Timer Finished",
-                        msg=msg,
-                        icon=icon_path
-                    )
-                    toast.show()
-                except Exception as e:
-                    print(f"Notification failed: {e}")
+                self.timer_running = False
+                if self.timer_widget and self.timer_widget.winfo_exists():
+                    self.timer_widget.update_time("00:00", "white")
+                
+                self.update_character_image("happy")
+                
+                msg = self.tr("msg_break_finished")
+                if self.show_character:
+                    self.show_bubble(msg, "happy")
+                else:
+                    self.send_notification("Break Finished", msg)
+    
+    def send_notification(self, title, msg):
+        try:
+            icon_path = resource_path("assets/icon.ico")
+            if not os.path.exists(icon_path):
+                icon_path = resource_path("assets/happy.png")
+            
+            toast = VerifyNotification(
+                app_id="Moti-Mate",
+                title=title,
+                msg=msg,
+                icon=icon_path
+            )
+            toast.show()
+        except Exception as e:
+            print(f"Notification failed: {e}")
 
     def load_custom_image(self):
         if os.path.exists(self.custom_image_path):
@@ -608,7 +790,7 @@ class MascotApp(ctk.CTk):
         size = (180, 240)
         emotions = ["neutral", "happy", "angry"]
         for emotion in emotions:
-            path = f"assets/{emotion}.png"
+            path = resource_path(f"assets/{emotion}.png")
             if os.path.exists(path):
                 try:
                     pil_img = Image.open(path).convert("RGBA")
@@ -620,57 +802,62 @@ class MascotApp(ctk.CTk):
                 self.images[emotion] = None
 
     def load_settings(self):
-        try:
-            import secrets
-            self.api_key = secrets.GEMINI_API_KEY
-        except ImportError:
-            self.api_key = ""
-            print("Warning: secrets.py not found. API functionality will be limited.")
-
-        # デフォルト設定
+        # 1. Initialize Default Settings
+        self.api_key = ""
         self.current_mode = "作業中"
+        self.language = "ja"
         self.interval_minutes = 5
         self.show_character = True
         self.remove_white_bg = False
         self.custom_image_path = ""
-        
-        # UI刷新に伴う新設定
         self.work_minutes = 25
         self.break_minutes = 5
-        self.ai_model = "gemini-2.0-flash"
+        self.long_break_minutes = 15
+        self.ai_model = "gemini-1.5-flash"
         self.window_transparency = 1.0
         self.always_on_top = True
         self.enable_notifications = True
-        
         self.personality_id = "default"
-        self.system_prompt = PERSONALITY_PRESETS["default"]["system_prompt"]
-
-        if os.path.exists("settings.json"):
-            try:
+        
+        # Initial system prompt (fallback)
+        presets_fallback = PERSONALITY_PRESETS.get(self.language, PERSONALITY_PRESETS["ja"])
+        self.system_prompt = presets_fallback["default"]["system_prompt"]
+        
+        try:
+            if os.path.exists("settings.json"):
                 with open("settings.json", "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    self.current_mode = data.get("current_mode", "作業中")
-                    self.interval_minutes = data.get("interval_minutes", 5)
-                    self.show_character = data.get("show_character", True)
-                    self.remove_white_bg = data.get("remove_white_bg", False)
-                    self.custom_image_path = data.get("custom_image_path", "")
+                    settings = json.load(f)
                     
-                    self.work_minutes = data.get("work_minutes", 25)
-                    self.break_minutes = data.get("break_minutes", 5)
-                    self.ai_model = data.get("ai_model", "gemini-2.0-flash")
-                    self.window_transparency = data.get("window_transparency", 1.0)
-                    self.always_on_top = data.get("always_on_top", True)
-                    self.enable_notifications = data.get("enable_notifications", True)
+                    self.api_key = settings.get("api_key", self.api_key)
+                    self.language = settings.get("language", self.language)
                     
-                    # 性格プリセット読み込み
-                    pid = data.get("personality_id", "default")
-                    if pid in PERSONALITY_PRESETS:
-                        self.personality_id = pid
-                        self.system_prompt = PERSONALITY_PRESETS[pid]["system_prompt"]
-                    else:
+                    self.work_minutes = settings.get("work_minutes", self.work_minutes)
+                    self.break_minutes = settings.get("break_minutes", self.break_minutes)
+                    self.long_break_minutes = settings.get("long_break_minutes", self.long_break_minutes)
+                    self.ai_model = settings.get("ai_model", self.ai_model)
+                    self.remove_white_bg = settings.get("remove_white_bg", self.remove_white_bg)
+                    self.show_character = settings.get("show_character", self.show_character)
+                    self.custom_image_path = settings.get("custom_image_path", self.custom_image_path)
+                    self.interval_minutes = settings.get("interval_minutes", self.interval_minutes)
+                    self.window_transparency = settings.get("window_transparency", self.window_transparency)
+                    self.always_on_top = settings.get("always_on_top", self.always_on_top)
+                    self.enable_notifications = settings.get("enable_notifications", self.enable_notifications)
+                    self.personality_id = settings.get("personality_id", self.personality_id)
+                    
+                    # Update system prompt based on loaded language/personality
+                    presets = PERSONALITY_PRESETS.get(self.language, PERSONALITY_PRESETS["ja"])
+                    
+                    # Validate personality_id exists in the current language preset
+                    if self.personality_id not in presets:
                         self.personality_id = "default"
-                        self.system_prompt = PERSONALITY_PRESETS["default"]["system_prompt"]
-            except: pass
+                        
+                    default_prompt = presets[self.personality_id]["system_prompt"]
+                    self.system_prompt = settings.get("system_prompt", default_prompt)
+                    
+        except Exception as e:
+            print(f"Setting load error: {e}")
+
+
 
     def open_settings(self):
         SettingsWindow(self)
@@ -728,82 +915,86 @@ class MascotApp(ctk.CTk):
                 time.sleep(1)
                 slept += 1
             
-            if not self.api_key:
-                continue
-
+            # Load待ちなどは不要になったので即座に実行
             self.process_with_ai()
 
     def process_with_ai(self, on_done=None):
+        if not self.api_key:
+            self.after(0, self.update_ui_reaction, "neutral", "設定からAPIキーを入れてね！")
+            return
+
         try:
+            # アクティブウィンドウ取得
+            active_window_title = "不明"
+            try:
+                window = gw.getActiveWindow()
+                if window:
+                    active_window_title = window.title.strip()
+            except: pass
+
+            # 画面キャプチャ (Vision復活)
             img = ImageGrab.grab()
+
             genai.configure(api_key=self.api_key)
             try:
                 model = genai.GenerativeModel(self.ai_model)
             except:
-                model = genai.GenerativeModel('gemini-2.0-flash')
-            
-            # タイマーの状態もコンテキストに追加
-            # ユーザー要望: 停止中は催促しない、稼働中は鼓舞する
+                model = genai.GenerativeModel('gemini-1.5-flash')
+
+            # コンテキスト作成
             if self.timer_running:
                 mins = self.timer_seconds // 60
                 secs = self.timer_seconds % 60
-                timer_status = f"【重要】タイマー稼働中 (残り {mins}分{secs}秒)。\n指示: 残り時間を意識して、ゴールに向けて鼓舞してください。「あと少し！」等の声掛けが有効です。"
+                timer_status = f"【現在: タイマー稼働中】残り {mins}分{secs}秒。"
             else:
-                timer_status = "【重要】タイマー停止中（フリーモード）。\n指示: ユーザーはタイマーを使わずに作業しています。タイマーの使用を強制したり、開始を促す発言は禁止です。純粋に画面の作業内容を見て評価してください。"
+                timer_status = "【現在: タイマー停止中】フリーモード。"
 
-            # JSON出力指示 (全プリセット共通)
+            # プロンプト構築
+            system_msg = (
+                f"{self.system_prompt}\n\n"
+                f"【現在状況】\n"
+                f"目標: {self.current_mode}\n"
+                f"アクティブウィンドウ: {active_window_title}\n"
+                f"タイマー: {timer_status}\n\n"
+                "あなたの役割: 上記の状況と添付画像を元に、ユーザーに声をかけてください。\n"
+                "・目標と関係ない娯楽(YouTube等)をしていたら、厳しく叱ってください(angry)。\n"
+                "・作業中なら、褒めたり励ましてください(happy)。\n"
+            )
+            
             json_instruction = """
-【出力フォーマット】
-以下のJSONフォーマットのみを出力してください。Markdownタグは不要です。
+出力は以下のJSON形式のみ:
 {
     "emotion": "happy", "angry", or "neutral",
-    "message": "50文字以内の台詞（タメ口、感情豊かに、パートナーとして）"
+    "message": "短いセリフ(50文字以内)"
 }"""
+            full_prompt = f"{system_msg}\n{json_instruction}"
 
-            # システムプロンプトと動的コンテキストの結合
-            full_prompt = f"{self.system_prompt}\n\n{json_instruction}\n\n【現在コンテキスト(自動挿入)】\nユーザーの現在の目標: {self.current_mode}\nタイマーの状態: {timer_status}"
-            
             response = model.generate_content([full_prompt, img])
             text = response.text.strip()
             
             import re
-            # Markdownのコードブロック記法などを削除
-            text = re.sub(r'^```json\s*', '', text, flags=re.MULTILINE)
-            text = re.sub(r'^```\s*', '', text, flags=re.MULTILINE)
-            text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
-            
-            # {} で囲まれた部分を抽出
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
                 text = match.group(0)
             
             try:
                 data = json.loads(text)
-            except json.JSONDecodeError:
-                # シングルクォート等でPython辞書として返ってきた場合のフォールバック
-                try:
-                    import ast
-                    data = ast.literal_eval(text)
-                except:
-                    # それでもダメならエラーログを出して終了（元の例外を再送出させてもよいが、ここではsafetyに）
-                    print(f"JSON Parse Error. Raw text: {text}")
-                    data = {"emotion": "neutral", "message": f"（AI応答の解析に失敗しました…）\n{text[:20]}..."}
-            
+            except:
+                data = {"emotion": "neutral", "message": text[:50]}
+
             emotion = data.get("emotion", "neutral")
             message = data.get("message", "...")
             
             self.after(0, self.update_ui_reaction, emotion, message)
             self.save_log(emotion, message)
-            
             if on_done:
                 self.after(0, on_done, emotion, message)
 
         except Exception as e:
-            print(f"Error: {e}")
-            self.save_log("error", f"エラー発生: {e}")
-            self.after(0, self.update_ui_reaction, "neutral", f"エラー: {e}")
-            if on_done:
-                self.after(0, on_done, "error", f"エラー: {e}")
+            print(f"GenAI Error: {e}")
+            self.save_log("error", str(e))
+            if "403" in str(e):
+                self.after(0, self.update_ui_reaction, "neutral", "APIキーエラー(403)。設定を確認してね")
 
     def update_ui_reaction(self, emotion, message):
         self.update_character_image(emotion)
@@ -816,15 +1007,15 @@ class MascotApp(ctk.CTk):
                 # インジケーターモードなら通知で知らせる
                 
                 # iconは assets/icon.ico または happy.png を使う
-                icon_path = os.path.abspath("assets/icon.ico")
+                icon_path = resource_path("assets/icon.ico")
                 if not os.path.exists(icon_path):
-                    path_emo = f"assets/{emotion}.png"
+                    path_emo = resource_path(f"assets/{emotion}.png")
                     if os.path.exists(path_emo):
-                        icon_path = os.path.abspath(path_emo)
+                        icon_path = path_emo
                     else:
-                        icon_path = os.path.abspath("assets/neutral.png")
+                        icon_path = resource_path("assets/neutral.png")
                 
-                toast = VerifyNotification(
+                toast = Notification(
                     app_id="Moti-Mate",
                     title="Motivation Mate",
                     msg=message,
@@ -847,8 +1038,31 @@ class MascotApp(ctk.CTk):
         self.quit()
 
 def run_tray(app):
-    image = Image.open("assets/icon.png")
+    try:
+        # User requested ICO preference
+        icon_path = resource_path("assets/icon.ico")
+        if not os.path.exists(icon_path):
+            icon_path = resource_path("assets/icon.png")
+            
+        image = Image.open(icon_path)
+    except Exception as e:
+        print(f"Tray icon load failed: {e}")
+        image = Image.new('RGB', (64, 64), color = (73, 109, 137))
     
+    def tr(key):
+        lang = getattr(app, "language", "ja")
+        return TRANSLATIONS.get(lang, TRANSLATIONS["ja"]).get(key, key)
+
+    def on_start(icon, item):
+        # メインスレッドで実行
+        app.after(0, lambda: app.start_pomodoro(app.work_minutes))
+
+    def on_stop(icon, item):
+        app.after(0, app.pause_pomodoro)
+
+    def on_end(icon, item):
+        app.after(0, app.reset_timer)
+
     def on_settings(icon, item):
         app.after(0, app.open_settings)
 
@@ -856,9 +1070,15 @@ def run_tray(app):
         icon.stop()
         app.after(0, app.quit_app)
 
+    # Windowsの仕様上、左クリックでメニューを出すのは標準外だが、
+    # default=Trueを設定することで左クリック(またはダブルクリック)で「設定」を開くようにする
     menu = pystray.Menu(
-        item('Settings', on_settings),
-        item('Exit', on_exit)
+        item(tr('tray_start'), on_start),
+        item(tr('tray_pause'), on_stop),
+        item(tr('tray_end'), on_end),
+        pystray.Menu.SEPARATOR,
+        item(tr('tray_settings'), on_settings, default=True),
+        item(tr('tray_exit'), on_exit)
     )
 
     icon = pystray.Icon("MotiMate", image, "Motivation Mate", menu)
